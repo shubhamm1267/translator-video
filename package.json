@@ -1,0 +1,14 @@
+{
+  "name": "clipcraft-shorts-studio",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "setup": "npm install --prefix frontend && npm install --prefix backend",
+    "dev": "concurrently -k -n API,WEB -c cyan,magenta \"npm run dev --prefix backend\" \"npm run start --prefix frontend\"",
+    "test": "npm test --prefix backend && npm run test:render --prefix backend"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "concurrently": "^9.2.1"
+  }
+}

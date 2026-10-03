@@ -1,0 +1,25 @@
+CLIPCRAFT ADAPTIVE SHORTS PRO v2 — HINDI QUICK START
+
+Yeh zip complete Angular + Node.js source project hai; kisi ek reference fish/tea/video ki fixed story nahi rakhi gayi hai.
+
+1. ZIP extract karo.
+2. Windows PowerShell project root mein kholo.
+3. Copy-Item backend/.env.example backend/.env
+4. notepad backend/.env ; GEMINI_API_KEY aur CARTESIA_API_KEY paste karo.
+5. Node 22.12+ aur FFmpeg/ffprobe PATH mein hone chahiye.
+6. npm install
+7. npm run setup
+8. npm run dev
+9. Browser: http://localhost:4200
+
+Kaise chalana hai:
+Video upload -> language -> us language ki voice -> AI model -> watermark/captions -> Analyze & Review.
+Naya narration chahiye toh "Regenerate Script — New Story" dabao; video dubara upload nahi hoga. Har button click mein Gemini text API request hoti hai.
+Script pasand aaye toh Render Edited Video -> MP4 download + title, description, tags.
+Clean video (jisme captions nahi) ke liye Captions ON aur Cover Existing Subtitles OFF rakho.
+
+Important: Gemini/Cartesia account quotas aur charges alag hain. Fact verification aur video usage rights check karo.
+Live API keys ke bina real audio/video AI response test nahi hua; included local mock tests available hain.
+
+V3 AUTO-FIX:
+Agar voice 19.9 seconds aur video 26.1 seconds ho, automatic voice duration correction chalega. Review mode mein khud words jodne ki zarurat nahi. AutoFit ke liye max 1 extra Gemini aur Cartesia call lag sakta hai (quota count hoga).
