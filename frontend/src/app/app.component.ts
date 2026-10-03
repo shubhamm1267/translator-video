@@ -2,7 +2,10 @@ import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-const API = 'http://localhost:3001';
+const API =
+  location.hostname === 'localhost'
+    ? 'http://localhost:3001'
+    : 'https://translator-video.onrender.com';
 type Language = 'en' | 'hi';
 interface Beat { start: number; end: number; text: string; }
 interface Script {
