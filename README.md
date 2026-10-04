@@ -20,7 +20,7 @@
 
 ## Windows setup
 
-Use **Node.js 22.12+**, npm, **FFmpeg and ffprobe** accessible on your PATH, and install Noto Sans Devanagari for Hindi caption glyphs. FFmpeg needs `libass` (subtitles filter) and `libx264`. No GPU/database required. Rendering requires a **persistent Node server**, not a 10-second Vercel function.
+Use **Node.js 22.12+**, npm, **FFmpeg and ffprobe** accessible on your PATH, and a Hindi-capable caption font. Windows usually has `Nirmala UI`; Linux/Render should use `Noto Sans Devanagari`. FFmpeg needs `libass` (subtitles filter) and `libx264`. No GPU/database required. Rendering requires a **persistent Node server**, not a 10-second Vercel function.
 
 ```powershell
 # extract the ZIP, then open PowerShell inside ClipCraft_Adaptive_Shorts_Pro_v3_AutoFit
@@ -47,8 +47,10 @@ Open http://localhost:4200 and verify API http://localhost:3001/api/health.
 ## Technical notes
 
 - Gemini endpoint: Files API + `/v1beta/interactions`, JSON output; fallback on model 404 only. Models available in selector include `gemini-3.5-flash-lite`, `gemini-3.8-flash`, `gemini-3.1-flash-lite`. Actual quotas/model availability can change by key/project; there is no guaranteed unlimited free tier.
+- Render deployment: the included root `Dockerfile` installs FFmpeg plus Noto fonts, so Hindi captions do not render as square boxes. If you use Render's native Node runtime instead of Docker, make sure the service has a Devanagari font available and set `CAPTION_FONT_HI` accordingly.
 - Optional dynamic research: Wikipedia API. Fact leads are **not verified automatically** and are not authoritative proof; check unusual claims before publishing. No hardcoded facts or reference narration. Unsupported salary/location/hazard claims must not be invented. If Wikipedia is unreachable, the system still writes a visual-grounded script.
 - Visual captions have **estimated proportional timestamps** across narration, not word-aligned Cartesia timing. Turn OFF if not wanted. Clean uncaptained input works best.
+- Hindi captions need a Devanagari font or they can render as square boxes. Set `CAPTION_FONT_HI=Nirmala UI` on Windows/local, or `CAPTION_FONT_HI=Noto Sans Devanagari` on Linux/Render after installing that font.
 - Cartesia `sonic-3.6` is used for one continuous voice. API costs/credits can apply. Keys stay only on backend. Cartesia Voice dropdown lists voice locale support; your account needs compatible voices.
 - The optional `backend/assets/background.mp3` can add low-level music (only music you have rights to use). This ZIP does not include copyrighted music.
 - Output jobs live in **memory**, temporary job files expire after `JOBS_TTL_MINUTES` (default 120); restart clears the in-memory history. Download videos before expiration. Live Gemini/Cartesia requests require your keys and were **not tested** in this environment.

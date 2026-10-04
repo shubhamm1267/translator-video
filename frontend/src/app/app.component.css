@@ -7,3 +7,14 @@
 .regenerate-btn {font:inherit;font-weight:800;font-size:14px;color:#fff;background:linear-gradient(120deg,#753bf1,#ba44bb);border:0;border-radius:12px; padding:14px 16px;cursor:pointer;box-shadow:0 6px 20px rgba(113,59,238,.24);transition:transform .2s,filter .2s;}
 .regenerate-btn:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.08);}
 .regenerate-btn:disabled{cursor:not-allowed;opacity:.55;}
+
+.voice-grid{grid-template-columns:repeat(4,1fr)}
+.voice-grid button{min-height:94px}
+.voice-grid button>span{font-size:12px;font-weight:900;letter-spacing:.08em;color:#d8ccff}
+.key-box{padding:14px;border:1px solid #38324f;border-radius:12px;background:#111729}
+.key-grid{display:grid;grid-template-columns:1fr 1fr auto auto;gap:9px;align-items:center}
+.key-grid input{margin:0!important}
+.save-key-btn,.clear-key-btn{border:1px solid #4c4269;border-radius:9px;padding:11px 12px;background:#2b2350;color:#efe9ff;font-size:11px;font-weight:800;white-space:nowrap}
+.clear-key-btn{background:#231c2f;color:#bdabc9}
+@media(max-width:1160px){.voice-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:740px){.key-grid{grid-template-columns:1fr}.save-key-btn,.clear-key-btn{width:100%}}

@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { validateScript } from '../src/ai.mjs';
-import { escapeAss, captionSegments } from '../src/media.mjs';
+import { escapeAss, captionSegments, overlayFiles } from '../src/media.mjs';
 
 test('video script generation normalizes time boundaries', () => {
   const x = validateScript({beats:[{start:0,end:2.9,text:'Watch this cool trick.'},{start:3,end:6,text:'It gets even better.'}],metadata:{title:'Test',tags:['shorts']}},6,'en');
@@ -20,6 +23,20 @@ test('caption chunks stay within horizontal safe area', () => {
   assert.ok(captions.some(c => c.text === 'antenna while'));
   assert.ok(captions.some(c => c.text === 'everyone turns'));
 });
+test('Hindi ASS captions use a Devanagari-capable font', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'clipcraft-ass-'));
+  try {
+    await overlayFiles(dir, {
+      language:'hi',
+      beats:[{start:0,end:3,text:'ये देखो, अब असली कमाल सामने आता है।'}]
+    }, {captions:true, watermark:'', cta:false}, 3, 3);
+    const ass = await readFile(join(dir, 'overlays.ass'), 'utf8');
+    const expected = process.env.CAPTION_FONT_HI || (process.platform === 'win32' ? 'Nirmala UI' : 'Noto Sans Devanagari');
+    assert.ok(ass.includes(`Style: Caption,${expected},`));
+  } finally {
+    await rm(dir, { recursive:true, force:true });
+  }
+});
 test('missing valid beats causes honest error',()=>{
   assert.throws(()=>validateScript({beats:[]},10,'hi'),/empty narration/);
 });
@@ -34,7 +51,7 @@ test('Interactions API model_output content can be parsed', async () => {
   assert.equal(interactionText({candidates:[{content:{parts:[{text:'legacy'}]}}]}),'');
 });
 
-import { buildStoryPrompt, scriptQualityWarnings, metadataWarnings } from '../src/creative.mjs';
+import { applyHindiNarratorStyle, buildStoryPrompt, scriptQualityWarnings, metadataWarnings } from '../src/creative.mjs';
 test('creative prompt demands concrete observations and continuous voice', () => {
  const p = buildStoryPrompt({summary:'Shoes, station, outfit demo',format:'montage',moments:[{time:0,visible:'sneakers'},{time:12,visible:'red jacket'}]},15.9,'en','funny');
  assert.match(p,/ONE CONTINUOUS spoken voiceover/);
@@ -48,6 +65,10 @@ test('Hindi prompt uses the Chinese-Hindi shorts style lock', () => {
  assert.match(p,/HINDI STYLE LOCK/);
  assert.match(p,/Chinese-process Hindi Shorts/);
  assert.match(p,/Devanagari/);
+ assert.match(p,/BEAT-SYNC CONTRACT/);
+ assert.match(p,/RETENTION DESIGN/);
+ assert.match(p,/Basanti|Raju|Kalu|Bunty/);
+ assert.match(p,/shuddh\/formal Hindi/);
 });
 test('creative quality check flags short generic buzzwords', () => {
  const warnings=scriptQualityWarnings({beats:[{text:'In this video, CGI has a plot twist.'}]},{summary:'Shoes and jackets'},15.9,'en');
@@ -106,6 +127,48 @@ test('Hindi shorts script rejects long hook and clothing-list narration', () => 
  const warnings=scriptQualityWarnings(weak,{summary:'Siphon experiment montage'},12,'hi');
  assert.ok(warnings.some(w=>w.includes('Hook is too long')));
  assert.ok(warnings.some(w=>w.includes('clothes or people')));
+});
+test('Hindi people narration prefers funny fictional nicknames over stiff labels', () => {
+ const weak={hook:'यहां असली पंगा शुरू है',beats:[
+  {text:'एक युवती यहां बहुत सावधानी से यह प्रक्रिया करती है।'},
+  {text:'महिला के सामने अचानक पूरी स्थिति बदल जाती है।'}
+ ]};
+ const warnings=scriptQualityWarnings(weak,{summary:'Funny prank moment'},12,'hi');
+ assert.ok(warnings.some(w=>w.includes('funny nickname')));
+ const punchy={hook:'बसंती ने यहां पंगा ले लिया',beats:[
+  {text:'अरे बसंती ने यहां फुल पंगा ले लिया, और सीन तुरंत उल्टा पड़ गया।'},
+  {text:'अब देखो, आख़िर में वही छोटा सा जुगाड़ पूरा खेल पलट देता है।'}
+ ]};
+ assert.ok(!scriptQualityWarnings(punchy,{summary:'Funny prank moment'},12,'hi').some(w=>w.includes('funny nickname')));
+});
+test('quality check rejects narration that lags behind the edit', () => {
+ const weak={hook:'Watch the first trick',beats:[
+  {text:'Earlier, we just saw the setup and now we are still talking about the old scene.'},
+  {text:'Before this moment, the previous shot had already shown the answer.'}
+ ]};
+ assert.ok(scriptQualityWarnings(weak,{summary:'Fast edit'},12,'en').some(w=>w.includes('lag behind')));
+});
+test('quality check asks for retention structure when script is flat', () => {
+ const weak={hook:'Simple process starts',beats:[
+  {text:'The item is placed on the table and the process begins.'},
+  {text:'The item is adjusted carefully until the process finishes.'}
+ ]};
+ assert.ok(scriptQualityWarnings(weak,{summary:'A process video'},12,'en').some(w=>w.includes('Retention structure')));
+});
+test('Hindi post-processing forces nickname and bol-chaal wording', () => {
+ const styled=applyHindiNarratorStyle({
+  language:'hi',
+  hook:'लड़की ने प्रक्रिया शुरू की',
+  beats:[
+    {start:0,end:3,text:'एक युवती यह प्रक्रिया प्रदर्शित करती है।'},
+    {start:3,end:8,text:'यह दृश्य परिवर्तन दिखाता है और अंत में सफलता से समाप्त होता है।'}
+  ],
+  metadata:{title:'Test',description:'Test #A #B #C',tags:['test']}
+ }, {summary:'A girl tries a funny setup and reacts',moments:[{visible:'girl reacts to setup'}]});
+ const text=[styled.hook,...styled.beats.map(b=>b.text)].join(' ');
+ assert.match(text, /(बसंती|चिंकी|पिंकी|गुड्डी|बबली)/);
+ assert.match(text, /(सीन|जुगाड़|अरे|भाई)/);
+ assert.doesNotMatch(text, /(प्रदर्शित|प्रक्रिया|युवती|लड़की)/);
 });
 
 test('English shorts script rejects documentary voice', () => {

@@ -31,6 +31,8 @@ export const CFG = {
   ttl: Math.max(5, Number(process.env.JOBS_TTL_MINUTES || 30)) * 60 * 1000,
   outputTtl: Math.max(1, Number(process.env.OUTPUT_TTL_MINUTES || 10)) * 60 * 1000,
   purgeWorkOnStart: process.env.PURGE_WORK_ON_START !== 'false',
+  captionFontHi: process.env.CAPTION_FONT_HI || (process.platform === 'win32' ? 'Nirmala UI' : 'Noto Sans Devanagari'),
+  captionFontEn: process.env.CAPTION_FONT_EN || 'DejaVu Sans',
   ffmpeg: process.env.FFMPEG_BIN || 'ffmpeg',
   ffprobe: process.env.FFPROBE_BIN || 'ffprobe',
 };

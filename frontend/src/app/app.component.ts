@@ -15,6 +15,7 @@ interface Script {
 interface Options {
   language: Language; geminiModel: string;
   tone: 'funny' | 'curious' | 'wholesome';
+  voiceStyle: 'viral_funny' | 'fast_explainer' | 'dramatic_reveal' | 'clean';
   watermark: string; opacity: number;
   captions: boolean; cta: boolean; originalAudio: boolean; coverOriginalCaptions: boolean;
   fit: 'fill' | 'contain'; voiceId: string; review: boolean;
@@ -40,6 +41,10 @@ interface Health {
   defaultVoice: string; hindiVoice: string;
   maxDuration: number; maxUploadMB: number;
 }
+interface ApiKeys {
+  geminiKey: string;
+  cartesiaKey: string;
+}
 
 @Component({
   selector: 'app-root', standalone: true,
@@ -59,10 +64,12 @@ export class AppComponent implements OnInit, OnDestroy {
   health: Health | null = null;
   voices: Voice[] = [];
   showAdvanced = false;
+  showKeys = false;
   timer: ReturnType<typeof setInterval> | null = null;
+  apiKeys: ApiKeys = { geminiKey: '', cartesiaKey: '' };
   options: Options = {
     language: 'en', geminiModel: 'gemini-3.5-flash-lite',
-    tone: 'funny', watermark: 'MyShortsChannel', opacity: 44,
+    tone: 'funny', voiceStyle: 'viral_funny', watermark: 'MyShortsChannel', opacity: 44,
     captions: true, cta: true, originalAudio: false, coverOriginalCaptions: false,
     fit: 'fill', voiceId: '', review: false
   };
@@ -88,7 +95,10 @@ export class AppComponent implements OnInit, OnDestroy {
   get backendConnected(): boolean { return !!this.health?.ok; }
   get downloadUrl(): string { return this.job?.videoUrl ? API + this.job.videoUrl : ''; }
 
-  ngOnInit(): void { void this.checkHealth(); }
+  ngOnInit(): void {
+    this.loadSavedKeys();
+    void this.checkHealth();
+  }
   ngOnDestroy(): void {
     this.stopPolling();
     if (this.localPreview) URL.revokeObjectURL(this.localPreview);
@@ -96,7 +106,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   async checkHealth(): Promise<void> {
     try {
-      const r = await fetch(`${API}/api/health`);
+      const r = await fetch(`${API}/api/health`, { headers: this.authHeaders() });
       if (!r.ok) throw new Error('Backend returned an error');
       this.health = await r.json() as Health;
       if (
@@ -114,7 +124,7 @@ export class AppComponent implements OnInit, OnDestroy {
   async loadVoices(): Promise<void> {
     this.fetchingVoices = true;
     try {
-      const r = await fetch(`${API}/api/voices`, { cache: 'no-store' });
+      const r = await fetch(`${API}/api/voices`, { cache: 'no-store', headers: this.authHeaders() });
       const payload = await r.json();
       if (!r.ok) throw new Error(payload.error || 'Could not load voices');
       const results: Voice[] = Array.isArray(payload.voices) ? payload.voices : [];
@@ -186,7 +196,7 @@ export class AppComponent implements OnInit, OnDestroy {
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
       const response = await fetch(`${API}/api/jobs`, {
         method: 'POST',
-        headers: { 'Content-Type': mime, 'X-Options': encoded },
+        headers: { 'Content-Type': mime, 'X-Options': encoded, ...this.authHeaders() },
         body: this.file
       });
       const data = await response.json();
@@ -223,7 +233,7 @@ export class AppComponent implements OnInit, OnDestroy {
     try {
       const r = await fetch(`${API}/api/jobs/${this.job.id}/regenerate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
         body: JSON.stringify({ options: this.options })
       });
       const payload = await r.json();
@@ -244,7 +254,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.apiError = ''; this.busy = true;
     try {
       const r = await fetch(`${API}/api/jobs/${j.id}/render`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
         body: JSON.stringify({ script: j.script, options: this.options })
       });
       const d = await r.json();
@@ -258,6 +268,39 @@ export class AppComponent implements OnInit, OnDestroy {
       await navigator.clipboard.writeText(value);
       this.notify(`${what} copied!`);
     } catch { this.notify('Clipboard requires HTTPS or localhost'); }
+  }
+  private loadSavedKeys(): void {
+    try {
+      const saved = JSON.parse(localStorage.getItem('clipcraft.apiKeys') || '{}') as Partial<ApiKeys>;
+      this.apiKeys = {
+        geminiKey: String(saved.geminiKey || ''),
+        cartesiaKey: String(saved.cartesiaKey || '')
+      };
+    } catch {
+      this.apiKeys = { geminiKey: '', cartesiaKey: '' };
+    }
+  }
+  saveKeys(): void {
+    localStorage.setItem('clipcraft.apiKeys', JSON.stringify(this.apiKeys));
+    this.notify('API keys saved in this browser');
+    void this.checkHealth();
+  }
+  clearKeys(): void {
+    this.apiKeys = { geminiKey: '', cartesiaKey: '' };
+    localStorage.removeItem('clipcraft.apiKeys');
+    this.voices = [];
+    this.options.voiceId = '';
+    this.notify('Saved browser keys cleared');
+    void this.checkHealth();
+  }
+  private authHeaders(): Record<string, string> {
+    const geminiKey = this.apiKeys.geminiKey.trim();
+    const cartesiaKey = this.apiKeys.cartesiaKey.trim();
+    if (!geminiKey && !cartesiaKey) return {};
+    const raw = new TextEncoder().encode(JSON.stringify({ geminiKey, cartesiaKey }));
+    let binary = '';
+    for (const n of raw) binary += String.fromCharCode(n);
+    return { 'X-Client-Keys': btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '') };
   }
   get tags(): string { return this.job?.script?.metadata.tags.join(', ') || ''; }
   set tags(value: string) {

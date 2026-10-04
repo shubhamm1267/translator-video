@@ -6,14 +6,19 @@ import { captionSegments } from '../src/media.mjs';
 test('26.1s video with 19.9s Cartesia triggers an automatic rewrite rather than error', () => {
   const result = audioFitPlan(19.9, 26.1);
   assert.equal(result.needsRewrite, true);
-  assert.equal(result.tempo, 1);
-  assert.ok(result.remainingSeconds > 5.5);
+  assert.equal(result.tempo, 0.88);
+  assert.ok(result.remainingSeconds < 3.6);
 });
 test('well matched audio needs no AI retries', () => {
   const result = audioFitPlan(25, 26.1);
   assert.equal(result.needsRewrite, false);
-  assert.equal(result.tempo, 1);
+  assert.ok(result.tempo < 1);
   assert.ok(result.remainingSeconds < 1.2);
+});
+test('noticeably short audio requests rewrite before it drifts ahead of visuals', () => {
+  const result = audioFitPlan(48, 55.9);
+  assert.equal(result.needsRewrite, true);
+  assert.equal(result.tempo, 0.88);
 });
 test('long audio requests an auto-shortening pass', () => {
   const result = audioFitPlan(33, 26.1);
