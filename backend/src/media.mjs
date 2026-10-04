@@ -8,19 +8,15 @@ import {
 } from 'node:fs/promises';
 
 import { join } from 'node:path';
-
 import { CFG } from './env.mjs';
+import { audioFitPlan } from './audio-fit.mjs';
 
-import {
-  audioFitPlan
-} from './audio-fit.mjs';
-
-// ========================================
-// PROCESS COMMANDS
-// ========================================
+// ====================================
+// COMMAND RUNNER
+// ====================================
 
 export async function cmd(
-  executable,
+  exe,
   args,
   {
     cwd,
@@ -28,77 +24,70 @@ export async function cmd(
   } = {}
 ) {
   return new Promise((resolve, reject) => {
-    const process = spawn(
-      executable,
-      args,
-      {
-        cwd,
-        windowsHide: true,
-        stdio: [
-          'ignore',
-          'pipe',
-          'pipe'
-        ]
-      }
-    );
+    const child = spawn(exe, args, {
+      cwd,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
 
-    let stderr = '';
     let stdout = '';
+    let stderr = '';
+    let settled = false;
 
-    const timeout = setTimeout(() => {
-      process.kill('SIGKILL');
+    const finish = (err, result) => {
+      if (settled) return;
 
-      reject(
-        new Error(`${executable} timed out`)
+      settled = true;
+      clearTimeout(timer);
+
+      err ? reject(err) : resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+
+      finish(
+        new Error(`${exe} timed out`)
       );
     }, timeoutMs);
 
-    process.stdout.on('data', data => {
+    child.stdout.on('data', b => {
       stdout = (
-        stdout + data.toString()
+        stdout + b.toString()
       ).slice(-150000);
     });
 
-    process.stderr.on('data', data => {
+    child.stderr.on('data', b => {
       stderr = (
-        stderr + data.toString()
+        stderr + b.toString()
       ).slice(-12000);
     });
 
-    process.on('error', error => {
-      clearTimeout(timeout);
-
-      reject(
+    child.on('error', e => {
+      finish(
         new Error(
-          `${executable} missing or unavailable: ${error.message}`
+          `${exe} unavailable: ${e.message}`
         )
       );
     });
 
-    process.on('close', code => {
-      clearTimeout(timeout);
-
-      if (code !== 0) {
-        reject(
-          new Error(
-            `${executable} failed: ${stderr.slice(-2200)}`
-          )
-        );
-      } else {
-        resolve({
-          stdout,
-          stderr
-        });
-      }
+    child.on('close', code => {
+      code === 0
+        ? finish(null, { stdout, stderr })
+        : finish(
+            new Error(
+              `${exe} failed: ${stderr.slice(-2200)}`
+            )
+          );
     });
   });
 }
 
-// ========================================
+// ====================================
 // VIDEO INFORMATION
-// ========================================
+// ====================================
 
-export async function probe(path) {
+export async function probe(file) {
   const { stdout } = await cmd(
     CFG.ffprobe,
     [
@@ -108,7 +97,7 @@ export async function probe(path) {
       '-show_streams',
       '-of',
       'json',
-      path
+      file
     ],
     {
       timeoutMs: 15000
@@ -116,21 +105,19 @@ export async function probe(path) {
   );
 
   const data = JSON.parse(stdout);
+  const tracks = data.streams || [];
 
-  const videoStream =
-    data.streams?.find(
-      stream => stream.codec_type === 'video'
-    );
+  const video = tracks.find(
+    x => x.codec_type === 'video'
+  );
 
-  if (!videoStream) {
-    throw new Error(
-      'No video track detected'
-    );
+  if (!video) {
+    throw new Error('No video track');
   }
 
   const duration = Number(
     data.format?.duration ||
-    videoStream.duration
+    video.duration
   );
 
   if (
@@ -139,31 +126,27 @@ export async function probe(path) {
     duration > CFG.maxDuration
   ) {
     throw new Error(
-      `Choose a video between 3 and ${CFG.maxDuration} seconds ` +
+      `Choose 3-${CFG.maxDuration}s video ` +
       `(received ${duration || '?'}s)`
     );
   }
 
   return {
     duration,
-
-    width: Number(videoStream.width),
-    height: Number(videoStream.height),
-
-    hasAudio: data.streams.some(
-      stream =>
-        stream.codec_type === 'audio'
+    width: Number(video.width),
+    height: Number(video.height),
+    hasAudio: tracks.some(
+      x => x.codec_type === 'audio'
     ),
-
-    codec: videoStream.codec_name
+    codec: video.codec_name
   };
 }
 
-// ========================================
-// REAL VOICE DURATION
-// ========================================
+// ====================================
+// ACTUAL VOICE DURATION
+// ====================================
 
-export async function durationOf(path) {
+export async function durationOf(file) {
   const { stdout } = await cmd(
     CFG.ffprobe,
     [
@@ -173,38 +156,28 @@ export async function durationOf(path) {
       'format=duration',
       '-of',
       'default=noprint_wrappers=1:nokey=1',
-      path
+      file
     ]
   );
 
-  const full = Number(
-    stdout.trim()
-  );
+  const full = Number(stdout.trim());
 
-  if (
-    !Number.isFinite(full) ||
-    full <= 0
-  ) {
+  if (!Number.isFinite(full) || full <= 0) {
     throw new Error(
-      'Cannot read voice duration'
+      'Cannot read audio duration'
     );
   }
 
-  // Cartesia can generate silence at the end.
-  // Detect that silence instead of counting it
-  // as spoken narration.
-
+  // Detect trailing silence added by TTS.
   try {
     const { stderr } = await cmd(
       CFG.ffmpeg,
       [
         '-hide_banner',
         '-i',
-        path,
-
+        file,
         '-af',
         'silencedetect=noise=-43dB:d=0.38',
-
         '-f',
         'null',
         '-'
@@ -218,51 +191,42 @@ export async function durationOf(path) {
       ...stderr.matchAll(
         /silence_start:\s*([0-9.]+)/g
       )
-    ].map(
-      match => Number(match[1])
-    );
+    ].map(x => +x[1]);
 
     const ends = [
       ...stderr.matchAll(
         /silence_end:\s*([0-9.]+)/g
       )
-    ].map(
-      match => Number(match[1])
-    );
+    ].map(x => +x[1]);
 
-    const tailStart =
-      starts.at(-1);
-
-    const tailEnd =
-      ends.at(-1);
+    const start = starts.at(-1);
+    const end = ends.at(-1);
 
     if (
-      Number.isFinite(tailStart) &&
-      Number.isFinite(tailEnd) &&
-      tailEnd >= full - 0.20 &&
-      tailStart > 0.4 &&
-      full - tailStart > 0.45
+      Number.isFinite(start) &&
+      Number.isFinite(end) &&
+      end >= full - 0.2 &&
+      start > 0.4 &&
+      full - start > 0.45
     ) {
       return Math.min(
         full,
-        tailStart + 0.08
+        start + 0.08
       );
     }
-
   } catch {
-    // Optional detection.
-    // Fall back to WAV duration.
+    // Use full duration if silence detection fails.
   }
 
   return full;
 }
 
-// ========================================
-// CAPTIONS
-// ========================================
+// ====================================
+// CAPTION HELPERS
+// ====================================
 
-export function escapeAss(str) {
-  return String(str || '')
+export function escapeAss(text) {
+  return String(text || '')
     .replace(/[\\{}]/g, '')
     .replace(/\r?\n/g, ' ')
     .replace(/\s+/g, ' ')
@@ -271,188 +235,123 @@ export function escapeAss(str) {
 }
 
 function stamp(seconds) {
-  const time = Math.max(
+  const cs = Math.max(
     0,
-    Number(seconds)
+    Math.round(seconds * 100)
   );
-
-  const cs = Math.round(
-    time * 100
-  );
-
-  const hours =
-    Math.floor(cs / 360000);
-
-  const minutes =
-    Math.floor(cs / 6000) % 60;
-
-  const secs =
-    Math.floor(cs / 100) % 60;
 
   return (
-    `${hours}:` +
-    `${String(minutes).padStart(2, '0')}:` +
-    `${String(secs).padStart(2, '0')}.` +
+    `${Math.floor(cs / 360000)}:` +
+    `${String(Math.floor(cs / 6000) % 60).padStart(2, '0')}:` +
+    `${String(Math.floor(cs / 100) % 60).padStart(2, '0')}.` +
     `${String(cs % 100).padStart(2, '0')}`
   );
 }
 
 function srtStamp(seconds) {
-  const milliseconds = Math.max(
+  const ms = Math.max(
     0,
     Math.round(seconds * 1000)
   );
 
-  const hours =
-    Math.floor(milliseconds / 3600000);
-
-  const minutes =
-    Math.floor(milliseconds / 60000) % 60;
-
-  const secondsPart =
-    Math.floor(milliseconds / 1000) % 60;
-
   return (
-    `${String(hours).padStart(2, '0')}:` +
-    `${String(minutes).padStart(2, '0')}:` +
-    `${String(secondsPart).padStart(2, '0')},` +
-    `${String(milliseconds % 1000).padStart(3, '0')}`
+    `${String(Math.floor(ms / 3600000)).padStart(2, '0')}:` +
+    `${String(Math.floor(ms / 60000) % 60).padStart(2, '0')}:` +
+    `${String(Math.floor(ms / 1000) % 60).padStart(2, '0')},` +
+    `${String(ms % 1000).padStart(3, '0')}`
   );
 }
 
-function captionChunks(words, language) {
-  const maxChars =
-    language === 'hi' ? 16 : 18;
+function chunkWords(words, lang) {
+  const chars = lang === 'hi' ? 16 : 18;
 
-  const maxWords = 3;
+  const result = [];
+  const current = [];
 
-  const chunks = [];
-
-  let current = [];
-
-  for (const raw of words) {
-    const word = String(
-      raw || ''
-    ).trim();
-
-    if (!word) {
-      continue;
-    }
-
-    const next = [
-      ...current,
-      word
-    ];
-
-    const tooWide =
-      next.join(' ').length > maxChars;
-
-    const tooMany =
-      next.length > maxWords;
-
+  for (const word of words) {
     if (
       current.length &&
-      (tooWide || tooMany)
+      (
+        current.length >= 3 ||
+        [...current, word].join(' ').length > chars
+      )
     ) {
-      chunks.push(
-        current.join(' ')
-      );
-
-      current = [word];
-
-    } else {
-      current = next;
+      result.push(current.join(' '));
+      current.length = 0;
     }
+
+    current.push(word);
   }
 
   if (current.length) {
-    chunks.push(
-      current.join(' ')
-    );
+    result.push(current.join(' '));
   }
 
-  return chunks;
+  return result;
 }
 
 export function captionSegments(
   script,
   speechSeconds
 ) {
-  const text = (
-    script.beats || []
-  )
-    .map(beat => beat.text)
+  const words = (script.beats || [])
+    .map(b => b.text)
     .join(' ')
-    .trim();
-
-  const words = text
+    .trim()
     .split(/\s+/)
     .filter(Boolean);
 
-  if (!words.length) {
-    return [];
-  }
+  if (!words.length) return [];
 
-  const chunks = captionChunks(
+  const chunks = chunkWords(
     words,
     script.language
   );
 
   const total = chunks.reduce(
-    (sum, chunk) =>
-      sum + Math.max(1, chunk.length),
+    (x, text) =>
+      x + Math.max(1, text.length),
     0
   );
 
-  const fullDuration = Number(
+  const full = Number(
     script.beats.at(-1)?.end || 0
   );
 
-  const duration =
-    speechSeconds === undefined
-      ? fullDuration
-      : Math.min(
-          fullDuration,
-          Math.max(
-            0,
-            Number(speechSeconds) || 0
-          )
-        );
+  const duration = speechSeconds === undefined
+    ? full
+    : Math.min(
+        full,
+        Math.max(0, Number(speechSeconds) || 0)
+      );
 
-  let done = 0;
+  let used = 0;
 
-  return chunks.map(chunk => {
-    const start =
-      duration * done / total;
+  return chunks
+    .map(text => {
+      const start =
+        duration * used / total;
 
-    done += Math.max(
-      1,
-      chunk.length
-    );
+      used += Math.max(
+        1,
+        text.length
+      );
 
-    const end =
-      duration * done / total;
+      const end =
+        duration * used / total;
 
-    return {
-      start: Number(
-        start.toFixed(3)
-      ),
-
-      end: Number(
-        end.toFixed(3)
-      ),
-
-      text: chunk
-    };
-  }).filter(
-    caption =>
-      caption.end > caption.start
-  );
+      return {
+        start: +start.toFixed(3),
+        end: +end.toFixed(3),
+        text
+      };
+    })
+    .filter(x => x.end > x.start);
 }
 
-// ========================================
-// WATERMARK + CAPTION + CTA FILES
-// ========================================
+// ====================================
+// OVERLAYS / CAPTIONS / CTA
+// ====================================
 
 export async function overlayFiles(
   dir,
@@ -461,9 +360,9 @@ export async function overlayFiles(
   duration,
   speechSeconds = duration
 ) {
-  const watermarkText = escapeAss(
-    opts.watermark || ''
-  ).slice(0, 34);
+  const font = script.language === 'hi'
+    ? CFG.captionFontHi
+    : CFG.captionFontEn;
 
   const opacity = Math.max(
     0,
@@ -473,26 +372,19 @@ export async function overlayFiles(
     )
   );
 
-  const assOpacity = Math.round(
+  const hexAlpha = Math.round(
     255 * (1 - opacity / 100)
   )
     .toString(16)
     .padStart(2, '0')
     .toUpperCase();
 
-  const ctaStart = Math.max(
-    1,
-    duration - 4.6
-  );
+  const mark = escapeAss(
+    opts.watermark || ''
+  ).slice(0, 34);
 
-  const font =
-    script.language === 'hi'
-      ? CFG.captionFontHi
-      : CFG.captionFontEn;
-
-  const head =
-`[Script Info]
-Title: ClipCraft Pro Overlays
+  const head = `[Script Info]
+Title: ClipCraft Pro
 ScriptType: v4.00+
 PlayResX: 720
 PlayResY: 1280
@@ -512,82 +404,70 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
   let events = '';
 
   // WATERMARK
-
-  if (
-    watermarkText &&
-    opacity > 0
-  ) {
+  if (mark && opacity > 0) {
     events +=
       `Dialogue: 10,0:00:00.00,${stamp(duration)},Watermark,,0,0,0,,` +
-      `{\\alpha&H${assOpacity}&\\fad(160,200)}` +
-      `${watermarkText}\n`;
+      `{\\alpha&H${hexAlpha}&\\fad(160,200)}${mark}\n`;
   }
 
-  // CAPTIONS
+  // VOICE CAPTIONS
+  const captions = opts.captions === false
+    ? []
+    : captionSegments(
+        script,
+        speechSeconds
+      );
 
-  const captions =
-    opts.captions === false
-      ? []
-      : captionSegments(
-          script,
-          speechSeconds
-        );
-
-  for (const caption of captions) {
-    const label = escapeAss(
-      caption.text
-    );
-
+  for (const c of captions) {
     events +=
-      `Dialogue: 5,${stamp(caption.start)},${stamp(caption.end)},` +
-      `Caption,,0,0,0,,` +
-      `{\\q2\\fad(70,90)` +
-      `\\t(0,135,\\fscx104\\fscy104)` +
+      `Dialogue: 5,${stamp(c.start)},${stamp(c.end)},Caption,,0,0,0,,` +
+      `{\\q2\\fad(70,90)\\t(0,135,\\fscx104\\fscy104)` +
       `\\t(135,320,\\fscx100\\fscy100)}` +
-      `${label}\n`;
+      `${escapeAss(c.text)}\n`;
   }
 
   // LIKE / SUBSCRIBE / BELL
-
   if (
     opts.cta !== false &&
     duration > 7
   ) {
-    const bits = [
-      {
-        a: ctaStart,
-        b: ctaStart + 1.05,
-        text: 'SUBSCRIBE',
-        col: '&H002B6BFF&'
-      },
+    const first = Math.max(
+      1,
+      duration - 4.6
+    );
 
+    const animations = [
       {
-        a: ctaStart + 1.28,
-        b: ctaStart + 2.35,
-        text: 'LIKE',
-        col: '&H00FFF0FF&'
+        a: first,
+        z: first + 1.05,
+        t: 'SUBSCRIBE',
+        c: '&H002B6BFF&'
       },
-
       {
-        a: ctaStart + 2.62,
-        b: Math.min(
+        a: first + 1.28,
+        z: first + 2.35,
+        t: 'LIKE',
+        c: '&H00FFF0FF&'
+      },
+      {
+        a: first + 2.62,
+        z: Math.min(
           duration,
-          ctaStart + 3.82
+          first + 3.82
         ),
-        text: 'BELL ON',
-        col: '&H0000F7FF&'
+        t: 'BELL ON',
+        c: '&H0000F7FF&'
       }
     ];
 
-    for (const bit of bits) {
+    for (const b of animations) {
       events +=
-        `Dialogue: 12,${stamp(bit.a)},${stamp(bit.b)},CTA,,0,0,0,,` +
-        `{\\c${bit.col}\\pos(360,1135)` +
+        `Dialogue: 12,${stamp(b.a)},${stamp(b.z)},CTA,,0,0,0,,` +
+        `{\\c${b.c}\\pos(360,1135)` +
         `\\fscx88\\fscy88` +
         `\\t(0,170,\\fscx116\\fscy116)` +
         `\\t(170,340,\\fscx100\\fscy100)` +
-        `\\fad(80,140)}` +
-        `${bit.text}\n`;
+        `\\fad(80,140)}${b.t}\n`;
     }
   }
 
@@ -603,14 +483,13 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
   );
 
   let srt = '';
-  let index = 0;
 
-  for (const caption of captions) {
+  captions.forEach((c, i) => {
     srt +=
-      `${++index}\n` +
-      `${srtStamp(caption.start)} --> ${srtStamp(caption.end)}\n` +
-      `${caption.text}\n\n`;
-  }
+      `${i + 1}\n` +
+      `${srtStamp(c.start)} --> ${srtStamp(c.end)}\n` +
+      `${c.text}\n\n`;
+  });
 
   await writeFile(
     join(dir, 'captions.srt'),
@@ -624,19 +503,19 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
   };
 }
 
-// ========================================
-// PREPARE CONTINUOUS VOICE
-// ========================================
+// ====================================
+// CONTINUOUS NARRATION
+// ====================================
 
 export async function assembleNarration(
   dir,
-  script,
+  _script,
   rawPaths,
   duration
 ) {
   if (rawPaths.length !== 1) {
     throw new Error(
-      'Expected exactly one continuous Cartesia WAV'
+      'Expected one continuous Cartesia WAV'
     );
   }
 
@@ -644,14 +523,10 @@ export async function assembleNarration(
     rawPaths[0]
   );
 
-  const narration = join(
+  const output = join(
     dir,
     'narration.wav'
   );
-
-  // Do NOT pad the first WAV to the video length.
-  // The final renderer decides both video and
-  // voice timing together.
 
   await cmd(
     CFG.ffmpeg,
@@ -660,23 +535,17 @@ export async function assembleNarration(
       '-loglevel',
       'error',
       '-y',
-
       '-i',
       rawPaths[0],
-
       '-af',
       'aresample=48000,aformat=channel_layouts=mono',
-
       '-ac',
       '1',
-
       '-ar',
       '48000',
-
       '-c:a',
       'pcm_s16le',
-
-      narration
+      output
     ],
     {
       timeoutMs: 120000
@@ -696,66 +565,202 @@ export async function assembleNarration(
     )
   );
 
-  return narration;
+  return output;
 }
 
-// ========================================
-// FINAL VIDEO RENDER
-// ========================================
+// ====================================
+// BACKGROUND MUSIC
+// ====================================
+
+// Prefer your own licensed background.mp3.
+// Otherwise generate a subtle rhythmic bed.
+
+async function optionalMusic(
+  dir,
+  duration
+) {
+  const music = join(
+    process.cwd(),
+    'assets',
+    'background.mp3'
+  );
+
+  if (
+    await access(music).then(
+      () => true,
+      () => false
+    )
+  ) {
+    return {
+      path: music,
+      loop: true
+    };
+  }
+
+  const generated = join(
+    dir,
+    'energetic-bed.wav'
+  );
+
+  const expression = [
+    '0.052*sin(2*PI*58*t)*if(lt(mod(t\\,0.75)\\,0.12)\\,exp(-mod(t\\,0.75)*24)\\,0)',
+    '0.018*sin(2*PI*116*t)*if(lt(mod(t+0.18\\,1.5)\\,0.16)\\,exp(-mod(t+0.18\\,1.5)*18)\\,0)'
+  ].join('+');
+
+  try {
+    await cmd(
+      CFG.ffmpeg,
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        `aevalsrc=${expression}:s=48000:d=${duration.toFixed(4)}`,
+        '-af',
+        'alimiter=limit=0.70',
+        '-ac',
+        '1',
+        '-ar',
+        '48000',
+        '-c:a',
+        'pcm_s16le',
+        generated
+      ],
+      {
+        timeoutMs: 35000
+      }
+    );
+
+    return {
+      path: generated,
+      loop: false
+    };
+  } catch {
+    return {
+      path: '',
+      loop: false
+    };
+  }
+}
+
+// ====================================
+// CTA SOUND EFFECTS
+// ====================================
+
+async function createCtaSfx(
+  dir,
+  duration
+) {
+  const path = join(
+    dir,
+    'cta-sfx.wav'
+  );
+
+  const start = Math.max(
+    1,
+    duration - 4.6
+  );
+
+  const hit = (
+    at,
+    len,
+    freq,
+    gain
+  ) =>
+    `${gain}*sin(2*PI*${freq}*(t-${at.toFixed(3)}))*` +
+    `if(between(t\\,${at.toFixed(3)}\\,${(at + len).toFixed(3)})\\,` +
+    `exp(-(t-${at.toFixed(3)})*26)\\,0)`;
+
+  const expr = [
+    hit(start + 0.18, 0.18, 185, 0.18),
+    hit(start + 0.20, 0.11, 420, 0.07),
+    hit(start + 1.44, 0.08, 720, 0.10),
+    hit(start + 1.53, 0.08, 980, 0.08),
+    hit(start + 2.82, 0.42, 1180, 0.10),
+    hit(start + 2.84, 0.36, 1580, 0.055)
+  ].join('+');
+
+  try {
+    await cmd(
+      CFG.ffmpeg,
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        `aevalsrc=${expr}:s=48000:d=${duration.toFixed(4)}`,
+        '-af',
+        'alimiter=limit=0.48',
+        '-ac',
+        '1',
+        '-ar',
+        '48000',
+        '-c:a',
+        'pcm_s16le',
+        path
+      ],
+      {
+        timeoutMs: 35000
+      }
+    );
+
+    return path;
+  } catch {
+    return '';
+  }
+}
+
+// ====================================
+// FINAL VIDEO RENDERING
+// ====================================
 
 export async function renderVideo(
   dir,
-  inputPath,
-  voicePath,
+  input,
+  voice,
   script,
   opts,
   info
 ) {
-  const sourceSeconds =
-    info.duration;
-
   let voiceSeconds;
 
   try {
     const timing = JSON.parse(
       await readFile(
-        join(
-          dir,
-          'narration-timing.json'
-        ),
+        join(dir, 'narration-timing.json'),
         'utf8'
       )
     );
 
-    voiceSeconds =
-      timing.rawSeconds;
-
+    voiceSeconds = timing.rawSeconds;
   } catch {
-    voiceSeconds = await durationOf(
-      voicePath
-    );
+    voiceSeconds = await durationOf(voice);
   }
 
-  // SAME PLAN for video and audio.
+  // This requires the latest audio-fit.mjs
+  // that supports canRender / outputSeconds.
   const plan = audioFitPlan(
     voiceSeconds,
-    sourceSeconds,
+    info.duration,
     opts.voiceStyle
   );
 
   if (!plan.canRender) {
     throw new Error(
-      `Narration ${voiceSeconds.toFixed(1)}s cannot be matched to ` +
-      `${sourceSeconds.toFixed(1)}s without abrupt cuts or ` +
-      `a long silent ending. Automatic Gemini rewrite ` +
-      `was unable to produce a usable take. ` +
-      `Try Regenerate Script. ` +
-      `No misleading partial MP4 was exported.`
+      `Narration ${voiceSeconds.toFixed(1)}s cannot fit ` +
+      `${info.duration.toFixed(1)}s video without a ` +
+      'long silent ending or cut-off. ' +
+      'Use Regenerate Script.'
     );
   }
 
-  const duration =
-    plan.outputSeconds;
+  const duration = plan.outputSeconds;
 
   await overlayFiles(
     dir,
@@ -770,80 +775,44 @@ export async function renderVideo(
     '-loglevel',
     'error',
     '-y',
-
     '-i',
-    inputPath,
-
+    input,
     '-i',
-    voicePath
+    voice
   ];
 
-  // Optional music.
-  const musicPath = join(
-    process.cwd(),
-    'assets',
-    'background.mp3'
+  const musicSource = await optionalMusic(
+    dir,
+    duration
   );
 
-  const customMusic = await access(
-    musicPath
-  ).then(
-    () => musicPath,
-    () => ''
-  );
+  const music = musicSource.path;
 
-  const renderMusic =
-    customMusic ||
-    await createEnergeticMusicBed(
-      dir,
-      duration
-    );
-
-  const ctaSfx =
+  const sfx =
     opts.cta !== false && duration > 7
-      ? await createCtaSfx(
-          dir,
-          duration
-        )
+      ? await createCtaSfx(dir, duration)
       : '';
 
-  const hasMusic = Boolean(
-    renderMusic
-  );
+  if (music) {
+    if (musicSource.loop) {
+      args.push(
+        '-stream_loop',
+        '-1'
+      );
+    }
 
-  const hasCtaSfx = Boolean(
-    ctaSfx
-  );
-
-  if (
-    hasMusic &&
-    customMusic
-  ) {
-    args.push(
-      '-stream_loop',
-      '-1',
-      '-i',
-      renderMusic
-    );
-
-  } else if (hasMusic) {
     args.push(
       '-i',
-      renderMusic
+      music
     );
   }
 
-  const sfxIndex =
-    hasMusic ? 3 : 2;
-
-  if (hasCtaSfx) {
+  if (sfx) {
     args.push(
       '-i',
-      ctaSfx
+      sfx
     );
   }
-
-  // VIDEO FIT
 
   const fit = opts.fit === 'contain'
     ? 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=0x10131C'
@@ -854,140 +823,93 @@ export async function renderVideo(
       ? ',drawbox=x=0:y=875:w=iw:h=190:color=0x151A22@0.90:t=fill'
       : '';
 
-  // VOICE FILTER:
-  // Pitch-preserving tempo.
-  // Light compression for consistent loudness.
-
   const voiceFx =
     'aresample=48000,' +
-
     `atempo=${plan.tempo.toFixed(5)},` +
-
-    'acompressor=threshold=0.075:ratio=3.0:attack=4:release=75,' +
-
+    'acompressor=threshold=0.075:ratio=3:attack=4:release=75,' +
     'equalizer=f=3300:t=q:w=1.1:g=3.2,' +
-
     'volume=1.18,' +
-
     `atrim=duration=${duration.toFixed(4)},` +
-
     'apad,' +
-
     `atrim=duration=${duration.toFixed(4)}`;
 
-  // Speed up ALL source frames with setpts.
-  // Fast Explainer style uses a higher
-  // minimum video rate.
-
   let filter =
-    `[0:v]` +
-
-    `setpts=(PTS-STARTPTS)/${plan.videoRate.toFixed(6)},` +
-
+    `[0:v]setpts=(PTS-STARTPTS)/${plan.videoRate.toFixed(6)},` +
     `fps=30,${fit},setsar=1${cover},` +
-
     'ass=overlays.ass,format=yuv420p[v];' +
 
     `[1:a]${voiceFx}` +
 
     (
-      hasMusic
+      music
         ? ',asplit=2[nmix][nside]'
         : '[nar]'
     ) +
-
     ';';
 
-  const audios = [
-    hasMusic ? '[nmix]' : '[nar]'
+  const streams = [
+    music ? '[nmix]' : '[nar]'
   ];
 
-  // ORIGINAL BACKGROUND SOUND
-
+  // Original ambient audio
   if (
     opts.originalAudio === true &&
     info.hasAudio
   ) {
     filter +=
       `[0:a]aresample=48000,` +
-
       `atempo=${plan.videoRate.toFixed(5)},` +
-
       'volume=0.07,' +
-
       `atrim=duration=${duration.toFixed(4)},` +
-
       'apad,' +
-
       `atrim=duration=${duration.toFixed(4)}` +
-
       '[amb];';
 
-    audios.push('[amb]');
+    streams.push('[amb]');
   }
 
-  // BACKGROUND MUSIC
-
-  if (hasMusic) {
+  // Background music with narration ducking
+  if (music) {
     filter +=
-      '[2:a]aresample=48000,' +
-
+      `[2:a]aresample=48000,` +
       'volume=0.16,' +
-
       `atrim=duration=${duration.toFixed(4)}` +
+      '[music];' +
 
-      '[music];';
-
-    filter +=
       '[music][nside]' +
-
       'sidechaincompress=' +
-
       'threshold=0.025:' +
-
       'ratio=8:' +
-
       'attack=25:' +
-
       'release=280' +
-
       '[duck];';
 
-    audios.push('[duck]');
+    streams.push('[duck]');
   }
 
-  // CTA SOUND EFFECTS
+  // Like / Subscribe / Bell sounds
+  if (sfx) {
+    const idx = music ? 3 : 2;
 
-  if (hasCtaSfx) {
     filter +=
-      `[${sfxIndex}:a]` +
-
-      'aresample=48000,' +
-
+      `[${idx}:a]aresample=48000,` +
       'volume=0.18,' +
-
       `atrim=duration=${duration.toFixed(4)}` +
-
       '[sfx];';
 
-    audios.push('[sfx]');
+    streams.push('[sfx]');
   }
 
-  // FINAL AUDIO MIX
-
+  // Final audio mix
   filter +=
-    audios.join('') +
+    streams.join('') +
 
-    `amix=inputs=${audios.length}:duration=first:normalize=0,` +
+    `amix=inputs=${streams.length}:duration=first:normalize=0,` +
 
     'loudnorm=I=-14:TP=-1.0:LRA=7,' +
-
     'alimiter=limit=0.95,' +
-
     'apad,' +
-
     `atrim=duration=${duration.toFixed(4)}` +
-
     '[a]';
 
   const output = join(
@@ -1046,35 +968,19 @@ export async function renderVideo(
 
   await access(output);
 
-  // Save actual export timing for diagnostics.
   await writeFile(
-    join(
-      dir,
-      'render-timing.json'
-    ),
+    join(dir, 'render-timing.json'),
     JSON.stringify(
       {
-        sourceSeconds,
+        sourceSeconds: info.duration,
         voiceSeconds,
-
-        finalSeconds:
-          duration,
-
-        visualSpeed:
-          plan.videoRate,
-
-        voiceTempo:
-          plan.tempo,
-
-        speechSeconds:
-          plan.speechEnd,
-
-        remainingSeconds:
-          plan.remainingSeconds,
-
+        finalSeconds: duration,
+        visualSpeed: plan.videoRate,
+        voiceTempo: plan.tempo,
+        speechSeconds: plan.speechEnd,
+        remainingSeconds: plan.remainingSeconds,
         style:
-          opts.voiceStyle ||
-          'viral_funny'
+          opts.voiceStyle || 'viral_funny'
       },
       null,
       2
@@ -1084,255 +990,52 @@ export async function renderVideo(
   return output;
 }
 
-// ========================================
-// MUSIC BED
-// ========================================
-
-async function createEnergeticMusicBed(
-  dir,
-  duration
-) {
-  const bed = join(
-    dir,
-    'energetic-bed.wav'
-  );
-
-  const seconds = Math.max(
-    3,
-    Number(duration) || 3
-  );
-
-  const expression = [
-    '0.052*sin(2*PI*58*t)*if(lt(mod(t\\,0.75)\\,0.12)\\,exp(-mod(t\\,0.75)*24)\\,0)',
-
-    '0.018*sin(2*PI*116*t)*if(lt(mod(t+0.18\\,1.5)\\,0.16)\\,exp(-mod(t+0.18\\,1.5)*18)\\,0)'
-  ].join('+');
-
-  try {
-    await cmd(
-      CFG.ffmpeg,
-      [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-y',
-
-        '-f',
-        'lavfi',
-
-        '-i',
-        `aevalsrc=${expression}:s=48000:d=${seconds.toFixed(4)}`,
-
-        '-af',
-        'alimiter=limit=0.70',
-
-        '-ac',
-        '1',
-
-        '-ar',
-        '48000',
-
-        '-c:a',
-        'pcm_s16le',
-
-        bed
-      ],
-      {
-        timeoutMs: 35000
-      }
-    );
-
-    await access(bed);
-
-    return bed;
-
-  } catch {
-    return '';
-  }
-}
-
-// ========================================
-// LIKE / SUBSCRIBE / BELL SOUNDS
-// ========================================
-
-async function createCtaSfx(
-  dir,
-  duration
-) {
-  const sfx = join(
-    dir,
-    'cta-sfx.wav'
-  );
-
-  const d = Math.max(
-    3,
-    Number(duration) || 3
-  );
-
-  const ctaStart = Math.max(
-    1,
-    d - 4.6
-  );
-
-  const hit = (
-    at,
-    len,
-    hz,
-    gain = 0.18
-  ) =>
-    `${gain}*sin(2*PI*${hz}*(t-${at.toFixed(3)}))*` +
-
-    `if(between(t\\,${at.toFixed(3)}\\,${(at + len).toFixed(3)})\\,` +
-
-    `exp(-(t-${at.toFixed(3)})*26)\\,0)`;
-
-  const expression = [
-    // Subscribe soft pop.
-    hit(
-      ctaStart + 0.18,
-      0.18,
-      185,
-      0.18
-    ),
-
-    hit(
-      ctaStart + 0.20,
-      0.11,
-      420,
-      0.07
-    ),
-
-    // Like two taps.
-    hit(
-      ctaStart + 1.44,
-      0.08,
-      720,
-      0.10
-    ),
-
-    hit(
-      ctaStart + 1.53,
-      0.08,
-      980,
-      0.08
-    ),
-
-    // Bell ring.
-    hit(
-      ctaStart + 2.82,
-      0.42,
-      1180,
-      0.10
-    ),
-
-    hit(
-      ctaStart + 2.84,
-      0.36,
-      1580,
-      0.055
-    )
-  ].join('+');
-
-  try {
-    await cmd(
-      CFG.ffmpeg,
-      [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-y',
-
-        '-f',
-        'lavfi',
-
-        '-i',
-        `aevalsrc=${expression}:s=48000:d=${d.toFixed(4)}`,
-
-        '-af',
-        'alimiter=limit=0.48',
-
-        '-ac',
-        '1',
-
-        '-ar',
-        '48000',
-
-        '-c:a',
-        'pcm_s16le',
-
-        sfx
-      ],
-      {
-        timeoutMs: 35000
-      }
-    );
-
-    await access(sfx);
-
-    return sfx;
-
-  } catch {
-    return '';
-  }
-}
-
-// ========================================
-// YOUTUBE METADATA
-// ========================================
+// ====================================
+// YOUTUBE METADATA OUTPUT
+// ====================================
 
 export async function writeMetadata(
   dir,
   script
 ) {
-  const metadata =
-    script.metadata;
+  const m = script.metadata || {};
 
-  const sources = Array.isArray(
-    metadata.sources
-  )
-    ? metadata.sources.map(
-        source =>
-          `${source.title}: ${source.url}`
-      ).join('\n')
+  const sources = Array.isArray(m.sources)
+    ? m.sources
+        .map(x =>
+          `${x.title}: ${x.url}`
+        )
+        .join('\n')
     : '';
 
-  const narration = script.beats
-    .map(
-      beat =>
-        `[${beat.start.toFixed(1)}s–${beat.end.toFixed(1)}s] ` +
-        beat.text
+  const narration = (script.beats || [])
+    .map(x =>
+      `[${Number(x.start).toFixed(1)}s–${Number(x.end).toFixed(1)}s] ${x.text}`
     )
     .join('\n');
 
   const text =
-    `${metadata.title}\n\n` +
+    `${m.title || ''}\n\n` +
 
     `DESCRIPTION\n` +
-    `${metadata.description}\n\n` +
+    `${m.description || ''}\n\n` +
 
     `TAGS\n` +
-    `${metadata.tags.join(', ')}\n\n` +
+    `${(m.tags || []).join(', ')}\n\n` +
 
     `NARRATION\n` +
     `${narration}\n\n` +
 
-    `OPTIONAL RESEARCH LEADS (verify before publishing)\n` +
-
-    `${sources || 'No external facts fetched'}\n`;
+    `OPTIONAL RESEARCH (verify before publishing)\n` +
+    `${sources || 'No external sources'}\n`;
 
   await writeFile(
-    join(
-      dir,
-      'metadata.txt'
-    ),
+    join(dir, 'metadata.txt'),
     text
   );
 
   await writeFile(
-    join(
-      dir,
-      'script.json'
-    ),
+    join(dir, 'script.json'),
     JSON.stringify(
       script,
       null,
