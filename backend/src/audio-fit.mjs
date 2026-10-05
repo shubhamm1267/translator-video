@@ -13,25 +13,43 @@ export const clamp = (number, low, high) =>
 const STYLES = Object.freeze({
   clean: {
     minimumVideoRate: 1.00,
-    maximumVideoRate: 1.50,
+    maximumVideoRate: 1.90,
+    minimumAudioTempo: 0.70,
     maximumAudioTempo: 1.26
   },
 
   dramatic_reveal: {
     minimumVideoRate: 1.00,
-    maximumVideoRate: 1.50,
+    maximumVideoRate: 1.90,
+    minimumAudioTempo: 0.70,
     maximumAudioTempo: 1.26
   },
 
   viral_funny: {
     minimumVideoRate: 1.04,
-    maximumVideoRate: 1.55,
+    maximumVideoRate: 2.25,
+    minimumAudioTempo: 0.68,
+    maximumAudioTempo: 1.28
+  },
+
+  facts_explainer: {
+    minimumVideoRate: 1.10,
+    maximumVideoRate: 2.25,
+    minimumAudioTempo: 0.68,
+    maximumAudioTempo: 1.32
+  },
+
+  story_narrator: {
+    minimumVideoRate: 1.02,
+    maximumVideoRate: 2.05,
+    minimumAudioTempo: 0.70,
     maximumAudioTempo: 1.28
   },
 
   fast_explainer: {
     minimumVideoRate: 1.16,
-    maximumVideoRate: 1.65,
+    maximumVideoRate: 2.40,
+    minimumAudioTempo: 0.66,
     maximumAudioTempo: 1.36
   }
 });
@@ -88,7 +106,7 @@ export function audioFitPlan(
 
   const tempo = clamp(
     requiredTempo,
-    0.88,
+    config.minimumAudioTempo,
     config.maximumAudioTempo
   );
 
@@ -108,10 +126,11 @@ export function audioFitPlan(
   // Extreme mismatch: request AI rewrite instead
   // of exporting an abruptly cut or silent video.
   const canRender =
-    requiredTempo >= 0.875 &&
+    requiredTempo >=
+      config.minimumAudioTempo - 0.005 &&
     requiredTempo <=
       config.maximumAudioTempo + 0.005 &&
-    remainingSeconds <= 0.42 &&
+    remainingSeconds <= 0.55 &&
     excessSeconds <= 0.20;
 
   const needsRewrite =
@@ -119,7 +138,11 @@ export function audioFitPlan(
     videoRate >= (
       style === 'fast_explainer'
         ? 1.46
-        : 1.23
+        : style === 'facts_explainer'
+          ? 1.36
+          : style === 'story_narrator'
+            ? 1.30
+            : 1.23
     ) ||
     requiredTempo >= 1.24;
 
@@ -146,7 +169,12 @@ export function audioFitPlan(
     remainingSeconds,
     excessSeconds,
 
+    emergencySlowdown:
+      requiredTempo < 0.875,
+
     fastExplainer:
-      style === 'fast_explainer'
+      style === 'fast_explainer' ||
+      style === 'facts_explainer' ||
+      style === 'story_narrator'
   };
 }

@@ -38,7 +38,7 @@ test('Hindi ASS captions use a Devanagari-capable font', async () => {
   }
 });
 test('missing valid beats causes honest error',()=>{
-  assert.throws(()=>validateScript({beats:[]},10,'hi'),/empty narration/);
+  assert.throws(()=>validateScript({beats:[]},10,'hi'),/empty narration/i);
 });
 
 test('Interactions API model_output content can be parsed', async () => {
@@ -85,11 +85,75 @@ test('metadata quality check rejects generic YouTube packaging', () => {
 });
 test('metadata quality check accepts specific packaging', () => {
  const good={
-  title:'Mango Cut Open Reveals a Hollow Fruit Trick',
+  title:'Mango Cut Open Reveals a Hollow Fruit Trick 🥭 #Mango #FruitArt #FoodFacts #Shorts',
   description:'A fresh mango is cut open to reveal a hollow carving trick before the inside is scooped out. The final shape makes this fruit art look impossible. #MangoCarving #FruitArt #Shorts',
   tags:['mango carving','hollow mango','fruit art','mango trick','food carving','viral fruit video','satisfying carving','shorts','creative food']
  };
  assert.deepEqual(metadataWarnings(good,{summary:'A mango is cut open and carved into a hollow shape',subject:'mango carving'},'en'),[]);
+});
+
+test('Hindi metadata requires Hindi description even when title is already Hindi', () => {
+ const englishDescription={
+  title:'अजीब फल अंदर से ऐसा निकला 🥭 #FruitFacts #WeirdFruit #HindiShorts #Shorts',
+  description:'This fruit is opened and the inside looks surprising. The final reveal makes it interesting. #FruitFacts #WeirdFruit #Shorts',
+  tags:['अजीब फल','fruit facts','weird fruit','hindi shorts','food facts','fruit video','viral facts','shorts']
+ };
+ assert.ok(metadataWarnings(englishDescription,{},'hi').some(w=>w.includes('Hindi description')));
+ const hindiDescription={
+  ...englishDescription,
+  description:'ये फल बाहर से नॉर्मल लगता है, लेकिन कटते ही अंदर का अजीब राज खुल जाता है। आख़िर का टेक्सचर इसे और मजेदार बना देता है। #FruitFacts #WeirdFruit #Shorts'
+ };
+ assert.ok(!metadataWarnings(hindiDescription,{},'hi').some(w=>w.includes('Hindi description')));
+});
+
+test('facts explainer prompt uses curiosity facts style', () => {
+ const p = buildStoryPrompt(
+  {
+   summary:'A strange fruit is opened and the inside is shown',
+   format:'food facts short',
+   moments:[
+    {time:0,visible:'whole unusual fruit on table'},
+    {time:12,visible:'fruit is cut open'},
+    {time:28,visible:'inside texture is revealed'}
+   ]
+  },
+  33.2,
+  'en',
+  'curious',
+  {},
+  0,
+  [],
+  'facts_explainer'
+ );
+ assert.match(p,/FACTS EXPLAINER STYLE/);
+ assert.match(p,/This selected preset is for odd/);
+ assert.match(p,/Do not invent science/);
+ assert.match(p,/at least 4 compact hashtags/);
+});
+
+test('story narrator prompt builds person-aware synced stories', () => {
+ const p = buildStoryPrompt(
+  {
+   summary:'A woman helps an elderly man cross a busy street while a child watches',
+   format:'street moment',
+   moments:[
+    {time:0,visible:'woman notices elderly man near traffic'},
+    {time:8,visible:'child watches from sidewalk'},
+    {time:20,visible:'group safely reaches the other side'}
+   ]
+  },
+  24,
+  'en',
+  'wholesome',
+  {},
+  0,
+  [],
+  'story_narrator'
+ );
+ assert.match(p,/STORY NARRATOR STYLE/);
+ assert.match(p,/woman, man, child, elderly person/);
+ assert.match(p,/SETUP -> CHARACTER CHOICE/);
+ assert.match(p,/Do not reveal the ending before the final shot/);
 });
 
 import {classifyFootage} from '../src/creative.mjs';

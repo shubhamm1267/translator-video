@@ -6,314 +6,1313 @@ const API =
   location.hostname === 'localhost'
     ? 'http://localhost:3001'
     : 'https://translator-video.onrender.com';
+
 type Language = 'en' | 'hi';
-interface Beat { start: number; end: number; text: string; }
+
+interface Beat {
+  start: number;
+  end: number;
+  text: string;
+}
+
 interface Script {
-  summary: string; hook: string; language: Language; beats: Beat[];
-  metadata: { title: string; description: string; tags: string[] };
+  summary: string;
+  hook: string;
+  language: Language;
+  beats: Beat[];
+
+  metadata: {
+    title: string;
+    description: string;
+    tags: string[];
+  };
 }
+
 interface Options {
-  language: Language; geminiModel: string;
-  tone: 'funny' | 'curious' | 'wholesome';
-  voiceStyle: 'viral_funny' | 'fast_explainer' | 'dramatic_reveal' | 'clean';
-  watermark: string; opacity: number;
-  captions: boolean; cta: boolean; originalAudio: boolean; coverOriginalCaptions: boolean;
-  fit: 'fill' | 'contain'; voiceId: string; review: boolean;
+  language: Language;
+
+  geminiModel: string;
+
+  tone:
+    | 'funny'
+    | 'curious'
+    | 'wholesome';
+
+  voiceStyle:
+    | 'viral_funny'
+    | 'facts_explainer'
+    | 'story_narrator'
+    | 'fast_explainer'
+    | 'dramatic_reveal'
+    | 'clean';
+
+  watermark: string;
+  opacity: number;
+
+  captions: boolean;
+  cta: boolean;
+  originalAudio: boolean;
+  coverOriginalCaptions: boolean;
+
+  fit:
+    | 'fill'
+    | 'contain';
+
+  voiceId: string;
+
+  review: boolean;
 }
+
 interface Job {
   id: string;
+
   scriptRevision?: number;
+
   hasAnalysis?: boolean;
-  status: 'uploading' | 'analyzing' | 'review' | 'regenerating' | 'rendering' | 'done' | 'error';
-  step: string; percent: number; error?: string | null;
-  info?: { duration: number; width: number; height: number };
+
+  status:
+    | 'uploading'
+    | 'analyzing'
+    | 'review'
+    | 'regenerating'
+    | 'rendering'
+    | 'done'
+    | 'error';
+
+  step: string;
+
+  percent: number;
+
+  error?: string | null;
+
+  info?: {
+    duration: number;
+    width: number;
+    height: number;
+  };
+
   script?: Script | null;
-  videoUrl?: string | null; captionsUrl?: string | null;
+
+  videoUrl?: string | null;
+
+  captionsUrl?: string | null;
+
   metadataUrl?: string | null;
 }
+
 interface Voice {
-  id: string; name: string; language: Language;
-  locale: string; native: boolean; gender?: string;
+  id: string;
+
+  name: string;
+
+  language: Language;
+
+  locale: string;
+
+  native: boolean;
+
+  gender?: string;
 }
-interface Health {
-  ok: boolean; ffmpeg: boolean; geminiConfigured: boolean;
-  cartesiaConfigured: boolean; geminiModel: string; geminiModels: string[];
-  defaultVoice: string; hindiVoice: string;
-  maxDuration: number; maxUploadMB: number;
+
+interface HealthStatus {
+  ok: boolean;
+
+  ffmpeg: boolean;
+
+  geminiConfigured: boolean;
+
+  cartesiaConfigured: boolean;
+
+  geminiModel: string;
+
+  geminiModels: string[];
+
+  defaultVoice: string;
+
+  hindiVoice: string;
+
+  maxDuration: number;
+
+  maxUploadMB: number;
 }
+
 interface ApiKeys {
   geminiKey: string;
+
   cartesiaKey: string;
 }
 
 @Component({
-  selector: 'app-root', standalone: true,
-  imports: [CommonModule, FormsModule],
-  templateUrl: './app.component.html',
-  styleUrl: './app.component.css'
+  selector: 'app-root',
+
+  standalone: true,
+
+  imports: [
+    CommonModule,
+    FormsModule
+  ],
+
+  templateUrl:
+    './app.component.html',
+
+  styleUrl:
+    './app.component.css'
 })
-export class AppComponent implements OnInit, OnDestroy {
+export class AppComponent
+  implements OnInit, OnDestroy {
+
   file: File | null = null;
+
   localPreview = '';
+
   dragging = false;
+
   busy = false;
+
   fetchingVoices = false;
+
   apiError = '';
+
   toast = '';
+
   job: Job | null = null;
-  health: Health | null = null;
+
+  health: HealthStatus | null = null;
+
   voices: Voice[] = [];
+
   showAdvanced = false;
+
   showKeys = false;
-  timer: ReturnType<typeof setInterval> | null = null;
-  apiKeys: ApiKeys = { geminiKey: '', cartesiaKey: '' };
+
+  timer:
+    ReturnType<typeof setInterval> |
+    null = null;
+
+  apiKeys: ApiKeys = {
+    geminiKey: '',
+    cartesiaKey: ''
+  };
+
   options: Options = {
-    language: 'en', geminiModel: 'gemini-3.5-flash-lite',
-    tone: 'funny', voiceStyle: 'viral_funny', watermark: 'MyShortsChannel', opacity: 44,
-    captions: true, cta: true, originalAudio: false, coverOriginalCaptions: false,
-    fit: 'fill', voiceId: '', review: false
+    language: 'en',
+
+    geminiModel:
+      'gemini-3.5-flash-lite',
+
+    tone:
+      'funny',
+
+    voiceStyle:
+      'viral_funny',
+
+    watermark:
+      'MyShortsChannel',
+
+    opacity:
+      44,
+
+    captions:
+      true,
+
+    cta:
+      true,
+
+    originalAudio:
+      false,
+
+    coverOriginalCaptions:
+      false,
+
+    fit:
+      'fill',
+
+    voiceId:
+      '',
+
+    review:
+      false
   };
 
   get filteredVoices(): Voice[] {
-    return this.voices.filter(v => v.language === this.options.language);
-  }
-  get selectedVoiceValid(): boolean {
-    return this.filteredVoices.some(v => v.id === this.options.voiceId);
-  }
-  get ready(): boolean {
-    return !!(
-      this.health?.ffmpeg && this.health.geminiConfigured &&
-      this.health.cartesiaConfigured && this.selectedVoiceValid
+    return this.voices.filter(
+      voice =>
+        voice.language ===
+        this.options.language
     );
   }
+
+  get selectedVoiceValid(): boolean {
+    return this.filteredVoices.some(
+      voice =>
+        voice.id ===
+        this.options.voiceId
+    );
+  }
+
+  get ready(): boolean {
+    const health =
+      this.health;
+
+    if (!health) {
+      return false;
+    }
+
+    return (
+      health.ffmpeg &&
+      health.geminiConfigured &&
+      health.cartesiaConfigured &&
+      this.selectedVoiceValid
+    );
+  }
+
   get processing(): boolean {
-    return !!this.job && ['uploading', 'analyzing', 'regenerating', 'rendering'].includes(this.job.status);
+    const job =
+      this.job;
+
+    if (!job) {
+      return false;
+    }
+
+    return [
+      'uploading',
+      'analyzing',
+      'regenerating',
+      'rendering'
+    ].includes(
+      job.status
+    );
   }
+
   get canRegenerate(): boolean {
-    return !!this.job?.hasAnalysis && ['review','done','error'].includes(this.job.status) && !this.busy && !this.processing && !!this.health?.geminiConfigured;
+    const job =
+      this.job;
+
+    if (!job) {
+      return false;
+    }
+
+    return (
+      !!job.hasAnalysis &&
+      [
+        'review',
+        'done',
+        'error'
+      ].includes(
+        job.status
+      ) &&
+      !this.busy &&
+      !this.processing &&
+      !!this.health?.geminiConfigured
+    );
   }
-  get backendConnected(): boolean { return !!this.health?.ok; }
-  get downloadUrl(): string { return this.job?.videoUrl ? API + this.job.videoUrl : ''; }
+
+  get backendConnected(): boolean {
+    return this.health?.ok ?? false;
+  }
+
+  // ======================================
+  // VIDEO PREVIEW URL
+  // ======================================
+
+  get videoPreviewUrl(): string {
+    return this.job?.videoUrl
+      ? API + this.job.videoUrl
+      : '';
+  }
+
+  // ======================================
+  // VIDEO DOWNLOAD URL
+  // ======================================
+
+  get downloadUrl(): string {
+    return this.job?.videoUrl
+      ? `${API}${this.job.videoUrl}?download=1`
+      : '';
+  }
+
+  // ======================================
+  // DOWNLOAD FILE NAME
+  // ======================================
+
+  get downloadFilename(): string {
+    const title =
+      this.job?.script?.metadata?.title ||
+      'clipcraft-video';
+
+    const safe =
+      title
+        .replace(
+          /[\x00-\x1f<>:"/\\|?*]+/g,
+          ' '
+        )
+        .replace(
+          /\s+/g,
+          ' '
+        )
+        .trim()
+        .slice(
+          0,
+          90
+        );
+
+    return `${
+      safe || 'clipcraft-video'
+    }.mp4`;
+  }
+
+  // ======================================
+  // INIT
+  // ======================================
 
   ngOnInit(): void {
     this.loadSavedKeys();
+
     void this.checkHealth();
   }
+
   ngOnDestroy(): void {
     this.stopPolling();
-    if (this.localPreview) URL.revokeObjectURL(this.localPreview);
-  }
 
-  async checkHealth(): Promise<void> {
-    try {
-      const r = await fetch(`${API}/api/health`, { headers: this.authHeaders() });
-      if (!r.ok) throw new Error('Backend returned an error');
-      this.health = await r.json() as Health;
-      if (
-        this.health.geminiModels?.length &&
-        !this.health.geminiModels.includes(this.options.geminiModel)
-      ) this.options.geminiModel = this.health.geminiModel;
-      this.apiError = '';
-      if (this.health.cartesiaConfigured) await this.loadVoices();
-    } catch (e) {
-      this.health = null;
-      this.apiError = `Backend unavailable: ${this.errorText(e)}`;
-    }
-  }
-
-  async loadVoices(): Promise<void> {
-    this.fetchingVoices = true;
-    try {
-      const r = await fetch(`${API}/api/voices`, { cache: 'no-store', headers: this.authHeaders() });
-      const payload = await r.json();
-      if (!r.ok) throw new Error(payload.error || 'Could not load voices');
-      const results: Voice[] = Array.isArray(payload.voices) ? payload.voices : [];
-      this.voices = results.filter(v =>
-        !!v.id && (v.language === 'hi' || v.language === 'en')
+    if (this.localPreview) {
+      URL.revokeObjectURL(
+        this.localPreview
       );
-      if (!this.selectedVoiceValid) {
-        this.options.voiceId = this.filteredVoices[0]?.id || '';
-      }
-      if (!this.filteredVoices.length) {
-        this.notify(`No ${this.options.language === 'hi' ? 'Hindi' : 'English'}-compatible Cartesia voices found.`);
-      }
-    } catch (e) {
-      this.voices = [];
-      this.options.voiceId = '';
-      this.apiError = this.errorText(e);
-    } finally {
-      this.fetchingVoices = false;
     }
   }
 
-  selectLanguage(language: Language): void {
-    if (this.options.language === language) return;
-    this.options.language = language;
-    // Clear the previous-language voice BEFORE rendering or requesting TTS.
-    this.options.voiceId = this.filteredVoices[0]?.id || '';
-    if (!this.options.voiceId && !this.fetchingVoices) {
+  // ======================================
+  // HEALTH
+  // ======================================
+
+  async checkHealth():
+    Promise<void> {
+
+    try {
+      const response =
+        await fetch(
+          `${API}/api/health`,
+          {
+            headers:
+              this.authHeaders()
+          }
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          'Backend returned an error'
+        );
+      }
+
+      const healthData =
+        (
+          await response.json()
+        ) as HealthStatus;
+
+      this.health =
+        healthData;
+
+      if (
+        healthData.geminiModels?.length &&
+        !healthData.geminiModels.includes(
+          this.options.geminiModel
+        )
+      ) {
+        this.options.geminiModel =
+          healthData.geminiModel;
+      }
+
+      this.apiError = '';
+
+      if (
+        healthData.cartesiaConfigured
+      ) {
+        await this.loadVoices();
+      }
+
+    } catch (error) {
+      this.health = null;
+
+      this.apiError =
+        `Backend unavailable: ${
+          this.errorText(error)
+        }`;
+    }
+  }
+
+  // ======================================
+  // CARTESIA VOICES
+  // ======================================
+
+  async loadVoices():
+    Promise<void> {
+
+    this.fetchingVoices =
+      true;
+
+    try {
+      const response =
+        await fetch(
+          `${API}/api/voices`,
+          {
+            cache:
+              'no-store',
+
+            headers:
+              this.authHeaders()
+          }
+        );
+
+      const payload =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          payload.error ||
+          'Could not load voices'
+        );
+      }
+
+      const results: Voice[] =
+        Array.isArray(
+          payload.voices
+        )
+          ? payload.voices
+          : [];
+
+      this.voices =
+        results.filter(
+          voice =>
+            !!voice.id &&
+            (
+              voice.language === 'hi' ||
+              voice.language === 'en'
+            )
+        );
+
+      if (
+        !this.selectedVoiceValid
+      ) {
+        this.options.voiceId =
+          this.filteredVoices[0]?.id ||
+          '';
+      }
+
+      if (
+        !this.filteredVoices.length
+      ) {
+        this.notify(
+          `No ${
+            this.options.language === 'hi'
+              ? 'Hindi'
+              : 'English'
+          }-compatible Cartesia voices found.`
+        );
+      }
+
+    } catch (error) {
+      this.voices =
+        [];
+
+      this.options.voiceId =
+        '';
+
+      this.apiError =
+        this.errorText(error);
+
+    } finally {
+      this.fetchingVoices =
+        false;
+    }
+  }
+
+  // ======================================
+  // LANGUAGE
+  // ======================================
+
+  selectLanguage(
+    language: Language
+  ): void {
+
+    if (
+      this.options.language ===
+      language
+    ) {
+      return;
+    }
+
+    this.options.language =
+      language;
+
+    this.options.voiceId =
+      this.filteredVoices[0]?.id ||
+      '';
+
+    if (
+      !this.options.voiceId &&
+      !this.fetchingVoices
+    ) {
       void this.loadVoices();
     }
   }
 
-  dropped(event: DragEvent): void {
+  // ======================================
+  // DRAG / DROP
+  // ======================================
+
+  dropped(
+    event: DragEvent
+  ): void {
+
     event.preventDefault();
-    this.dragging = false;
-    const f = event.dataTransfer?.files?.item(0);
-    if (f) this.setFile(f);
-  }
-  browse(event: Event): void {
-    const f = (event.target as HTMLInputElement).files?.item(0);
-    if (f) this.setFile(f);
-  }
-  setFile(f: File): void {
-    if (!/\.(mp4|mov|webm|mkv)$/i.test(f.name)) {
-      this.notify('Upload MP4, MOV, WebM or MKV'); return;
+
+    this.dragging =
+      false;
+
+    const file =
+      event.dataTransfer
+        ?.files
+        ?.item(0);
+
+    if (file) {
+      this.setFile(file);
     }
-    if (this.health && f.size > this.health.maxUploadMB * 1048576) {
-      this.notify(`Maximum upload is ${this.health.maxUploadMB} MB`); return;
+  }
+
+  browse(
+    event: Event
+  ): void {
+
+    const file =
+      (
+        event.target as
+        HTMLInputElement
+      )
+        .files
+        ?.item(0);
+
+    if (file) {
+      this.setFile(file);
     }
-    if (this.localPreview) URL.revokeObjectURL(this.localPreview);
-    this.file = f;
-    this.localPreview = URL.createObjectURL(f);
-    this.job = null; this.toast = '';
+  }
+
+  // ======================================
+  // FILE
+  // ======================================
+
+  setFile(
+    file: File
+  ): void {
+
+    if (
+      !/\.(mp4|mov|webm|mkv)$/i
+        .test(file.name)
+    ) {
+      this.notify(
+        'Upload MP4, MOV, WebM or MKV'
+      );
+
+      return;
+    }
+
+    const health =
+      this.health;
+
+    if (
+      health &&
+      file.size >
+        health.maxUploadMB *
+        1048576
+    ) {
+      this.notify(
+        `Maximum upload is ${
+          health.maxUploadMB
+        } MB`
+      );
+
+      return;
+    }
+
+    if (
+      this.localPreview
+    ) {
+      URL.revokeObjectURL(
+        this.localPreview
+      );
+    }
+
+    this.file =
+      file;
+
+    this.localPreview =
+      URL.createObjectURL(
+        file
+      );
+
+    this.job =
+      null;
+
+    this.toast =
+      '';
+
     this.stopPolling();
   }
 
-  async create(review: boolean): Promise<void> {
-    if (!this.file || this.busy || !this.ready) return;
-    this.options.review = review;
-    this.busy = true; this.apiError = ''; this.job = null;
+  // ======================================
+  // CREATE
+  // ======================================
+
+  async create(
+    review: boolean
+  ): Promise<void> {
+
+    const file =
+      this.file;
+
+    if (
+      !file ||
+      this.busy ||
+      !this.ready
+    ) {
+      return;
+    }
+
+    this.options.review =
+      review;
+
+    this.busy =
+      true;
+
+    this.apiError =
+      '';
+
+    this.job =
+      null;
+
     try {
-      const name = this.file.name.toLowerCase();
-      const mime = name.endsWith('.mov') ? 'video/quicktime'
-        : name.endsWith('.mkv') ? 'video/x-matroska'
-        : name.endsWith('.webm') ? 'video/webm' : 'video/mp4';
-      const raw = new TextEncoder().encode(JSON.stringify(this.options));
-      let binary = '';
-      for (const n of raw) binary += String.fromCharCode(n);
-      const encoded = btoa(binary)
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-      const response = await fetch(`${API}/api/jobs`, {
-        method: 'POST',
-        headers: { 'Content-Type': mime, 'X-Options': encoded, ...this.authHeaders() },
-        body: this.file
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Upload failed');
-      this.job = data as Job;
+      const name =
+        file.name
+          .toLowerCase();
+
+      const mime =
+        name.endsWith('.mov')
+          ? 'video/quicktime'
+
+          : name.endsWith('.mkv')
+            ? 'video/x-matroska'
+
+            : name.endsWith('.webm')
+              ? 'video/webm'
+
+              : 'video/mp4';
+
+      const raw =
+        new TextEncoder()
+          .encode(
+            JSON.stringify(
+              this.options
+            )
+          );
+
+      let binary =
+        '';
+
+      for (
+        const number of raw
+      ) {
+        binary +=
+          String.fromCharCode(
+            number
+          );
+      }
+
+      const encoded =
+        btoa(binary)
+          .replace(
+            /\+/g,
+            '-'
+          )
+          .replace(
+            /\//g,
+            '_'
+          )
+          .replace(
+            /=/g,
+            ''
+          );
+
+      const response =
+        await fetch(
+          `${API}/api/jobs`,
+          {
+            method:
+              'POST',
+
+            headers: {
+              'Content-Type':
+                mime,
+
+              'X-Options':
+                encoded,
+
+              ...this.authHeaders()
+            },
+
+            body:
+              file
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+          'Upload failed'
+        );
+      }
+
+      this.job =
+        data as Job;
+
       this.startPolling();
-    } catch (e) { this.apiError = this.errorText(e); }
-    finally { this.busy = false; }
+
+    } catch (error) {
+      this.apiError =
+        this.errorText(error);
+
+    } finally {
+      this.busy =
+        false;
+    }
   }
 
-  private startPolling(): void {
+  // ======================================
+  // POLLING
+  // ======================================
+
+  private startPolling():
+    void {
+
     this.stopPolling();
-    this.timer = setInterval(() => { void this.poll(); }, 1300);
+
+    this.timer =
+      setInterval(
+        () => {
+          void this.poll();
+        },
+        1300
+      );
+
     void this.poll();
   }
-  private stopPolling(): void {
-    if (this.timer) { clearInterval(this.timer); this.timer = null; }
-  }
-  private async poll(): Promise<void> {
-    if (!this.job) return;
-    try {
-      const r = await fetch(`${API}/api/jobs/${this.job.id}`, { cache: 'no-store' });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Polling failed');
-      this.job = d as Job;
-      if (['done', 'review', 'error'].includes(this.job.status)) this.stopPolling();
-    } catch (e) { this.stopPolling(); this.apiError = this.errorText(e); }
+
+  private stopPolling():
+    void {
+
+    if (this.timer) {
+      clearInterval(
+        this.timer
+      );
+
+      this.timer =
+        null;
+    }
   }
 
-  async regenerateScript(): Promise<void> {
-    if (!this.job || !this.canRegenerate) return;
-    this.busy = true;
-    this.apiError = '';
+  private async poll():
+    Promise<void> {
+
+    const job =
+      this.job;
+
+    if (!job) {
+      return;
+    }
+
     try {
-      const r = await fetch(`${API}/api/jobs/${this.job.id}/regenerate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
-        body: JSON.stringify({ options: this.options })
-      });
-      const payload = await r.json();
-      if (!r.ok) throw new Error(payload.error || 'Script regeneration failed');
-      this.job = payload as Job;
-      this.notify('Creating a fresh story using the same video…');
+      const response =
+        await fetch(
+          `${API}/api/jobs/${job.id}`,
+          {
+            cache:
+              'no-store'
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+          'Polling failed'
+        );
+      }
+
+      const updatedJob =
+        data as Job;
+
+      this.job =
+        updatedJob;
+
+      if (
+        [
+          'done',
+          'review',
+          'error'
+        ].includes(
+          updatedJob.status
+        )
+      ) {
+        this.stopPolling();
+      }
+
+    } catch (error) {
+      this.stopPolling();
+
+      this.apiError =
+        this.errorText(error);
+    }
+  }
+
+  // ======================================
+  // REGENERATE SCRIPT
+  // ======================================
+
+  async regenerateScript():
+    Promise<void> {
+
+    const job =
+      this.job;
+
+    if (
+      !job ||
+      !this.canRegenerate
+    ) {
+      return;
+    }
+
+    this.busy =
+      true;
+
+    this.apiError =
+      '';
+
+    try {
+      const response =
+        await fetch(
+          `${API}/api/jobs/${job.id}/regenerate`,
+          {
+            method:
+              'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+
+              ...this.authHeaders()
+            },
+
+            body:
+              JSON.stringify({
+                options:
+                  this.options
+              })
+          }
+        );
+
+      const payload =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          payload.error ||
+          'Script regeneration failed'
+        );
+      }
+
+      this.job =
+        payload as Job;
+
+      this.notify(
+        'Creating a fresh story using the same video…'
+      );
+
       this.startPolling();
-    } catch (e) {
-      this.apiError = this.errorText(e);
+
+    } catch (error) {
+      this.apiError =
+        this.errorText(error);
+
     } finally {
-      this.busy = false;
+      this.busy =
+        false;
     }
   }
 
-  async renderEdits(): Promise<void> {
-    if (!this.job?.script || this.processing || !this.selectedVoiceValid) return;
-    const j = this.job;
-    this.apiError = ''; this.busy = true;
+  // ======================================
+  // RENDER
+  // ======================================
+
+  async renderEdits():
+    Promise<void> {
+
+    const job =
+      this.job;
+
+    if (
+      !job?.script ||
+      this.processing ||
+      !this.selectedVoiceValid
+    ) {
+      return;
+    }
+
+    this.apiError =
+      '';
+
+    this.busy =
+      true;
+
     try {
-      const r = await fetch(`${API}/api/jobs/${j.id}/render`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
-        body: JSON.stringify({ script: j.script, options: this.options })
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Render failed');
-      this.job = d as Job; this.startPolling();
-    } catch (e) { this.apiError = this.errorText(e); }
-    finally { this.busy = false; }
-  }
-  async copy(value: string, what: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(value);
-      this.notify(`${what} copied!`);
-    } catch { this.notify('Clipboard requires HTTPS or localhost'); }
-  }
-  private loadSavedKeys(): void {
-    try {
-      const saved = JSON.parse(localStorage.getItem('clipcraft.apiKeys') || '{}') as Partial<ApiKeys>;
-      this.apiKeys = {
-        geminiKey: String(saved.geminiKey || ''),
-        cartesiaKey: String(saved.cartesiaKey || '')
-      };
-    } catch {
-      this.apiKeys = { geminiKey: '', cartesiaKey: '' };
+      const response =
+        await fetch(
+          `${API}/api/jobs/${job.id}/render`,
+          {
+            method:
+              'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+
+              ...this.authHeaders()
+            },
+
+            body:
+              JSON.stringify({
+                script:
+                  job.script,
+
+                options:
+                  this.options
+              })
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+          'Render failed'
+        );
+      }
+
+      this.job =
+        data as Job;
+
+      this.startPolling();
+
+    } catch (error) {
+      this.apiError =
+        this.errorText(error);
+
+    } finally {
+      this.busy =
+        false;
     }
   }
-  saveKeys(): void {
-    localStorage.setItem('clipcraft.apiKeys', JSON.stringify(this.apiKeys));
-    this.notify('API keys saved in this browser');
+
+  // ======================================
+  // COPY
+  // ======================================
+
+  async copy(
+    value: string,
+    what: string
+  ): Promise<void> {
+
+    try {
+      await navigator.clipboard
+        .writeText(
+          value
+        );
+
+      this.notify(
+        `${what} copied!`
+      );
+
+    } catch {
+      this.notify(
+        'Clipboard requires HTTPS or localhost'
+      );
+    }
+  }
+
+  // ======================================
+  // API KEYS
+  // ======================================
+
+  private loadSavedKeys():
+    void {
+
+    try {
+      const saved =
+        JSON.parse(
+          localStorage.getItem(
+            'clipcraft.apiKeys'
+          ) || '{}'
+        ) as Partial<ApiKeys>;
+
+      this.apiKeys = {
+        geminiKey:
+          String(
+            saved.geminiKey ||
+            ''
+          ),
+
+        cartesiaKey:
+          String(
+            saved.cartesiaKey ||
+            ''
+          )
+      };
+
+    } catch {
+      this.apiKeys = {
+        geminiKey: '',
+        cartesiaKey: ''
+      };
+    }
+  }
+
+  saveKeys():
+    void {
+
+    localStorage.setItem(
+      'clipcraft.apiKeys',
+      JSON.stringify(
+        this.apiKeys
+      )
+    );
+
+    this.notify(
+      'API keys saved in this browser'
+    );
+
     void this.checkHealth();
   }
-  clearKeys(): void {
-    this.apiKeys = { geminiKey: '', cartesiaKey: '' };
-    localStorage.removeItem('clipcraft.apiKeys');
-    this.voices = [];
-    this.options.voiceId = '';
-    this.notify('Saved browser keys cleared');
+
+  clearKeys():
+    void {
+
+    this.apiKeys = {
+      geminiKey: '',
+      cartesiaKey: ''
+    };
+
+    localStorage.removeItem(
+      'clipcraft.apiKeys'
+    );
+
+    this.voices =
+      [];
+
+    this.options.voiceId =
+      '';
+
+    this.notify(
+      'Saved browser keys cleared'
+    );
+
     void this.checkHealth();
   }
-  private authHeaders(): Record<string, string> {
-    const geminiKey = this.apiKeys.geminiKey.trim();
-    const cartesiaKey = this.apiKeys.cartesiaKey.trim();
-    if (!geminiKey && !cartesiaKey) return {};
-    const raw = new TextEncoder().encode(JSON.stringify({ geminiKey, cartesiaKey }));
-    let binary = '';
-    for (const n of raw) binary += String.fromCharCode(n);
-    return { 'X-Client-Keys': btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '') };
+
+  private authHeaders():
+    Record<string, string> {
+
+    const geminiKey =
+      this.apiKeys.geminiKey
+        .trim();
+
+    const cartesiaKey =
+      this.apiKeys.cartesiaKey
+        .trim();
+
+    if (
+      !geminiKey &&
+      !cartesiaKey
+    ) {
+      return {};
+    }
+
+    const raw =
+      new TextEncoder()
+        .encode(
+          JSON.stringify({
+            geminiKey,
+            cartesiaKey
+          })
+        );
+
+    let binary =
+      '';
+
+    for (
+      const number of raw
+    ) {
+      binary +=
+        String.fromCharCode(
+          number
+        );
+    }
+
+    return {
+      'X-Client-Keys':
+        btoa(binary)
+          .replace(
+            /\+/g,
+            '-'
+          )
+          .replace(
+            /\//g,
+            '_'
+          )
+          .replace(
+            /=/g,
+            ''
+          )
+    };
   }
-  get tags(): string { return this.job?.script?.metadata.tags.join(', ') || ''; }
-  set tags(value: string) {
-    if (this.job?.script) this.job.script.metadata.tags =
-      value.split(',').map(x => x.trim()).filter(Boolean).slice(0, 15);
+
+  // ======================================
+  // TAGS
+  // ======================================
+
+  get tags():
+    string {
+
+    return this.job
+      ?.script
+      ?.metadata
+      .tags
+      .join(', ') ||
+      '';
   }
-  get fullScript(): string { return this.job?.script?.beats.map(x => x.text).join(' ') || ''; }
-  errorText(e: unknown): string { return e instanceof Error ? e.message : String(e); }
-  notify(m: string): void { this.toast = m; }
-  API_LINK(p: string | null | undefined): string { return p ? API + p : '#'; }
-  bytes(x: number): string { return `${(x / 1048576).toFixed(1)} MB`; }
-  seconds(t: number): string {
-    const s = Math.round(t || 0);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  set tags(
+    value: string
+  ) {
+    if (
+      this.job?.script
+    ) {
+      this.job.script
+        .metadata
+        .tags =
+          value
+            .split(',')
+            .map(
+              item =>
+                item.trim()
+            )
+            .filter(
+              Boolean
+            )
+            .slice(
+              0,
+              15
+            );
+    }
+  }
+
+  // ======================================
+  // FULL SCRIPT
+  // ======================================
+
+  get fullScript():
+    string {
+
+    return this.job
+      ?.script
+      ?.beats
+      .map(
+        beat =>
+          beat.text
+      )
+      .join(' ') ||
+      '';
+  }
+
+  // ======================================
+  // HELPERS
+  // ======================================
+
+  errorText(
+    error: unknown
+  ): string {
+
+    return error
+      instanceof Error
+        ? error.message
+        : String(error);
+  }
+
+  notify(
+    message: string
+  ): void {
+
+    this.toast =
+      message;
+  }
+
+  API_LINK(
+    path:
+      string |
+      null |
+      undefined
+  ): string {
+
+    return path
+      ? API + path
+      : '#';
+  }
+
+  bytes(
+    value: number
+  ): string {
+
+    return `${
+      (
+        value /
+        1048576
+      ).toFixed(1)
+    } MB`;
+  }
+
+  seconds(
+    time: number
+  ): string {
+
+    const seconds =
+      Math.round(
+        time || 0
+      );
+
+    return `${
+      Math.floor(
+        seconds / 60
+      )
+    }:${
+      String(
+        seconds % 60
+      ).padStart(
+        2,
+        '0'
+      )
+    }`;
   }
 }

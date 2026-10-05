@@ -6,19 +6,33 @@ import { captionSegments } from '../src/media.mjs';
 test('26.1s video with 19.9s Cartesia triggers an automatic rewrite rather than error', () => {
   const result = audioFitPlan(19.9, 26.1);
   assert.equal(result.needsRewrite, true);
-  assert.equal(result.tempo, 0.88);
-  assert.ok(result.remainingSeconds < 3.6);
+  assert.ok(result.videoRate > 1.2);
+  assert.ok(result.remainingSeconds < 0.5);
 });
 test('well matched audio needs no AI retries', () => {
   const result = audioFitPlan(25, 26.1);
   assert.equal(result.needsRewrite, false);
-  assert.ok(result.tempo < 1);
-  assert.ok(result.remainingSeconds < 1.2);
+  assert.ok(result.videoRate < 1.08);
+  assert.ok(result.remainingSeconds < 0.5);
 });
-test('noticeably short audio requests rewrite before it drifts ahead of visuals', () => {
+test('noticeably short audio tightens video instead of leaving a silent tail', () => {
   const result = audioFitPlan(48, 55.9);
+  assert.equal(result.canRender, true);
+  assert.ok(result.videoRate > 1.15);
+  assert.ok(result.remainingSeconds < 0.5);
+});
+test('very short generated narration still renders without user-facing fit error', () => {
+  const result = audioFitPlan(23.3, 52.6);
+  assert.equal(result.canRender, true);
   assert.equal(result.needsRewrite, true);
-  assert.equal(result.tempo, 0.88);
+  assert.ok(result.videoRate > 2);
+  assert.ok(result.remainingSeconds < 0.6);
+});
+test('story narrator keeps people-focused clips on the same timeline', () => {
+  const result = audioFitPlan(40, 52, 'story_narrator');
+  assert.equal(result.canRender, true);
+  assert.ok(result.videoRate > 1.25);
+  assert.ok(result.remainingSeconds < 0.6);
 });
 test('long audio requests an auto-shortening pass', () => {
   const result = audioFitPlan(33, 26.1);

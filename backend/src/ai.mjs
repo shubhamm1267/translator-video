@@ -19,6 +19,18 @@ const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const timeout = ms => AbortSignal.timeout(ms);
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+const isAbort = error =>
+  error?.name === 'AbortError' ||
+  /aborted due to timeout|operation was aborted|timeout/i
+    .test(String(error?.message || error));
+
+function timeoutMessage(label) {
+  return (
+    `Gemini ${label} took too long. ` +
+    'Please retry once; longer videos can need more time on the free tier.'
+  );
+}
+
 export const GEMINI_MODELS = Object.freeze([
   'gemini-3.5-flash-lite',
   'gemini-3.8-flash',
@@ -120,33 +132,58 @@ async function askGemini(
   }
 
   const models = modelOrder(preferred);
+  let timeoutError = null;
 
   for (const [i, model] of models.entries()) {
-    const r = await fetch(`${BASE}/interactions`, {
-      method: 'POST',
-      signal: timeout(180000),
+    let r;
 
-      headers: {
-        'x-goog-api-key': geminiKey(keys),
-        'Content-Type': 'application/json'
-      },
+    try {
+      r = await fetch(`${BASE}/interactions`, {
+        method: 'POST',
+        signal: timeout(
+          label === 'video analysis'
+            ? 420000
+            : label === 'voice fit'
+              ? 300000
+              : 240000
+        ),
 
-      body: JSON.stringify({
-        model,
-        store: false,
-        input,
-
-        response_format: {
-          type: 'text',
-          mime_type: 'application/json',
-          schema
+        headers: {
+          'x-goog-api-key': geminiKey(keys),
+          'Content-Type': 'application/json'
         },
 
-        generation_config: {
-          temperature: label === 'story' ? 0.95 : 0.18
-        }
-      })
-    });
+        body: JSON.stringify({
+          model,
+          store: false,
+          input,
+
+          response_format: {
+            type: 'text',
+            mime_type: 'application/json',
+            schema
+          },
+
+          generation_config: {
+            temperature: label === 'story' ? 0.95 : 0.18
+          }
+        })
+      });
+    } catch (error) {
+      if (
+        isAbort(error) &&
+        i < models.length - 1
+      ) {
+        timeoutError = error;
+        continue;
+      }
+
+      if (isAbort(error)) {
+        throw new Error(timeoutMessage(label));
+      }
+
+      throw error;
+    }
 
     if (r.status === 404 && i < models.length - 1) {
       continue;
@@ -179,34 +216,48 @@ async function askGemini(
     }
   }
 
+  if (timeoutError) {
+    throw new Error(timeoutMessage(label));
+  }
+
   throw new Error('No Gemini model is available');
 }
 
 async function uploadVideo(path, report, keys) {
   const { size } = await stat(path);
 
-  const start = await fetch(
-    'https://generativelanguage.googleapis.com/upload/v1beta/files',
-    {
-      method: 'POST',
-      signal: timeout(30000),
+  let start;
 
-      headers: {
-        'x-goog-api-key': geminiKey(keys),
-        'X-Goog-Upload-Protocol': 'resumable',
-        'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': String(size),
-        'X-Goog-Upload-Header-Content-Type': 'video/mp4',
-        'Content-Type': 'application/json'
-      },
+  try {
+    start = await fetch(
+      'https://generativelanguage.googleapis.com/upload/v1beta/files',
+      {
+        method: 'POST',
+        signal: timeout(60000),
 
-      body: JSON.stringify({
-        file: {
-          display_name: 'ClipCraft video'
-        }
-      })
+        headers: {
+          'x-goog-api-key': geminiKey(keys),
+          'X-Goog-Upload-Protocol': 'resumable',
+          'X-Goog-Upload-Command': 'start',
+          'X-Goog-Upload-Header-Content-Length': String(size),
+          'X-Goog-Upload-Header-Content-Type': 'video/mp4',
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+          file: {
+            display_name: 'ClipCraft video'
+          }
+        })
+      }
+    );
+  } catch (error) {
+    if (isAbort(error)) {
+      throw new Error(timeoutMessage('upload init'));
     }
-  );
+
+    throw error;
+  }
 
   await checked(start, 'Gemini upload init');
 
@@ -216,19 +267,29 @@ async function uploadVideo(path, report, keys) {
     throw new Error('Gemini upload URL is missing');
   }
 
-  const sent = await fetch(url, {
-    method: 'POST',
-    duplex: 'half',
-    signal: timeout(180000),
+  let sent;
 
-    headers: {
-      'Content-Length': String(size),
-      'X-Goog-Upload-Offset': '0',
-      'X-Goog-Upload-Command': 'upload, finalize'
-    },
+  try {
+    sent = await fetch(url, {
+      method: 'POST',
+      duplex: 'half',
+      signal: timeout(420000),
 
-    body: createReadStream(path)
-  });
+      headers: {
+        'Content-Length': String(size),
+        'X-Goog-Upload-Offset': '0',
+        'X-Goog-Upload-Command': 'upload, finalize'
+      },
+
+      body: createReadStream(path)
+    });
+  } catch (error) {
+    if (isAbort(error)) {
+      throw new Error(timeoutMessage('video upload'));
+    }
+
+    throw error;
+  }
 
   await checked(sent, 'Gemini video upload');
 
@@ -240,16 +301,32 @@ async function uploadVideo(path, report, keys) {
 
   report('Processing uploaded footage...', 19);
 
-  for (let n = 0; n < 48; n++) {
-    const response = await fetch(
-      `${BASE}/${uploaded.name}`,
-      {
-        headers: {
-          'x-goog-api-key': geminiKey(keys)
-        },
-        signal: timeout(12000)
+  for (let n = 0; n < 96; n++) {
+    let response;
+
+    try {
+      response = await fetch(
+        `${BASE}/${uploaded.name}`,
+        {
+          headers: {
+            'x-goog-api-key': geminiKey(keys)
+          },
+          signal: timeout(30000)
+        }
+      );
+    } catch (error) {
+      if (isAbort(error)) {
+        report(
+          'Gemini is still processing the video...',
+          19
+        );
+
+        await wait(2500);
+        continue;
       }
-    );
+
+      throw error;
+    }
 
     await checked(response, 'Gemini file status');
 
@@ -268,11 +345,11 @@ async function uploadVideo(path, report, keys) {
       );
     }
 
-    await wait(2500);
+    await wait(3000);
   }
 
   throw new Error(
-    'Gemini video processing timed out'
+    timeoutMessage('video processing')
   );
 }
 
@@ -387,7 +464,7 @@ export function validateScript(
     metadata: {
       title: String(
         meta.title || 'Funny Moments'
-      ).slice(0, 70),
+      ).slice(0, 110),
 
       description: String(
         meta.description || ''
@@ -607,6 +684,11 @@ Lively, natural, spicy desi Hindi.
 Funny comments on visible actions.
 One original situational punchline.
 Do not insert forced nicknames.
+Description must be Hindi/Hinglish
+in Devanagari. Keep the existing
+title if it already passes title
+rules; fix only the description
+when the title is already good.
 
 ENGLISH:
 Natural, witty American English.
@@ -617,8 +699,10 @@ TARGET:
 - Roast actions and situations,
   never body shape or identity.
 - No fabricated facts.
-- Video-specific title under 70 characters.
+- Video-specific title under 110 characters.
+- Title includes 1-3 relevant emojis and at least 4 compact hashtags.
 - Meaningful first description line.
+- Hindi descriptions must be written in Devanagari Hindi/Hinglish.
 - 2-3 relevant hashtags.
 - 6-12 relevant searchable tags.
 - 3-5 chronological storytelling beats.
@@ -679,7 +763,10 @@ Return ONE complete JSON script.
     }
   }
 
-  chosen = applyHindiNarratorStyle(chosen);
+  chosen = applyHindiNarratorStyle(
+    chosen,
+    context.inventory
+  );
 
   chosen.metadata.sources =
     context.research?.sources || [];
@@ -772,7 +859,10 @@ Return schema-compliant JSON only.
         mime_type: 'video/mp4',
         processing: {
           type: 'static',
-          fps: 2
+          fps:
+            duration > 45
+              ? 1.25
+              : 2
         }
       },
 
@@ -983,13 +1073,13 @@ export async function retimeScriptForVoice(
   const targetWords = Math.max(
     6,
     Math.min(
-      320,
+      520,
       Math.round(
         sourceWords *
         Math.max(
           0.65,
           Math.min(
-            1.95,
+            2.85,
             target / Math.max(1, measuredSeconds)
           )
         )
@@ -1027,6 +1117,15 @@ Approximately ${targetWords}.
 Target spoken duration:
 ${target.toFixed(2)} seconds.
 
+FIT RULE:
+If the current voice is much shorter
+than the target, expand the narration
+with more visible step-by-step detail,
+one curiosity question and a delayed
+final payoff. Do not summarize the
+ending early. The last sentence should
+still be active during the final visual.
+
 LANGUAGE:
 ${script.language}
 
@@ -1042,6 +1141,7 @@ Use 3-5 connected chronological beats.
 Last beat ends at ${duration.toFixed(2)}.
 
 Include accurate title, description and tags.
+Title must include 1-3 relevant emojis and at least 4 compact hashtags.
 
 Return one complete script JSON.
 `;
@@ -1059,7 +1159,8 @@ Return one complete script JSON.
       response.data,
       duration,
       script.language
-    )
+    ),
+    context.inventory
   );
 
   revised.metadata.sources =
@@ -1220,6 +1321,8 @@ export async function speakCartesia(
 
   const styles = {
     viral_funny: [1.16, 1.38],
+    facts_explainer: [1.24, 1.42],
+    story_narrator: [1.13, 1.39],
     fast_explainer: [1.30, 1.45],
     dramatic_reveal: [1.10, 1.34],
     clean: [
@@ -1252,7 +1355,9 @@ export async function speakCartesia(
       volume,
       emotion: opts.voiceStyle === 'clean'
         ? CFG.cartesiaEmotion
-        : 'excited'
+        : opts.voiceStyle === 'story_narrator'
+          ? 'positivity'
+          : 'excited'
     }
   };
 

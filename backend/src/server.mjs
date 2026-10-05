@@ -1,4 +1,3 @@
-
 import http from 'node:http';
 
 import { randomUUID } from 'node:crypto';
@@ -81,6 +80,118 @@ const MAX_ACTIVE = 2;
 // ==========================================
 // HELPERS
 // ==========================================
+
+function safeDownloadName(value) {
+  return String(value || 'clipcraft-video')
+    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 90) ||
+    'clipcraft-video';
+}
+
+function asciiDownloadName(value) {
+  const safe = safeDownloadName(value)
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7e]+/g, ' ')
+    .replace(/[^A-Za-z0-9 ._()-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 70);
+
+  return safe || 'clipcraft-video';
+}
+
+function encodeHeaderFilename(value) {
+  return encodeURIComponent(value)
+    .replace(/[!'()*]/g, char =>
+      `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+    );
+}
+
+function contentDisposition(
+  disposition,
+  title,
+  extension
+) {
+  const safeTitle =
+    safeDownloadName(title);
+
+  const asciiTitle =
+    asciiDownloadName(title);
+
+  const unicodeFilename =
+    `${safeTitle}.${extension}`;
+
+  const asciiFilename =
+    `${asciiTitle}.${extension}`;
+
+  return (
+    `${disposition}; ` +
+    `filename="${asciiFilename}"; ` +
+    `filename*=UTF-8''${encodeHeaderFilename(unicodeFilename)}`
+  );
+}
+
+function parseByteRange(
+  value,
+  size
+) {
+  const match =
+    /^bytes=(\d*)-(\d*)$/
+      .exec(String(value || '').trim());
+
+  if (!match) {
+    return null;
+  }
+
+  let start;
+  let end;
+
+  if (!match[1] && match[2]) {
+    const suffix =
+      Number(match[2]);
+
+    if (
+      !Number.isInteger(suffix) ||
+      suffix <= 0
+    ) {
+      return null;
+    }
+
+    start =
+      Math.max(0, size - suffix);
+
+    end =
+      size - 1;
+
+  } else {
+    start =
+      Number(match[1]);
+
+    end = match[2]
+      ? Number(match[2])
+      : size - 1;
+  }
+
+  if (
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 0 ||
+    end < start ||
+    start >= size
+  ) {
+    return null;
+  }
+
+  return {
+    start,
+    end: Math.min(
+      end,
+      size - 1
+    )
+  };
+}
 
 const hasKeys = keys => Boolean(
   (keys?.geminiKey || CFG.geminiKey) &&
@@ -223,6 +334,8 @@ function cleanOptions(o = {}) {
 
   const voiceStyle = [
     'viral_funny',
+    'facts_explainer',
+    'story_narrator',
     'fast_explainer',
     'dramatic_reveal',
     'clean'
@@ -968,9 +1081,11 @@ async function readJson(
 // ==========================================
 
 async function deliverFile(
+  req,
   res,
   j,
-  kind
+  kind,
+  forceDownload = false
 ) {
   const files = {
     video: [
@@ -1007,6 +1122,16 @@ async function deliverFile(
   const [name, type] =
     files[kind];
 
+  const extension =
+    name.split('.').at(-1);
+
+  const titleName =
+    kind === 'video'
+      ? safeDownloadName(
+          j.script?.metadata?.title
+        )
+      : `clipcraft-${kind}`;
+
   const path = join(
     j.dir,
     name
@@ -1015,22 +1140,101 @@ async function deliverFile(
   const fileStat =
     await stat(path);
 
+  const disposition =
+    kind === 'video' && !forceDownload
+      ? 'inline'
+      : 'attachment';
+
+  const headers = {
+    'Content-Type': type,
+
+    'Content-Disposition':
+      contentDisposition(
+        disposition,
+        titleName,
+        extension
+      ),
+
+    'Cache-Control':
+      'no-store',
+
+    'X-Content-Type-Options':
+      'nosniff'
+  };
+
+  // HTML5 video players commonly request byte ranges.
+  // Returning 206 + Content-Range prevents blank previews,
+  // especially for larger MP4 files served from another origin.
+  if (kind === 'video') {
+    headers['Accept-Ranges'] =
+      'bytes';
+
+    const rangeHeader =
+      req.headers.range;
+
+    if (rangeHeader) {
+      const range =
+        parseByteRange(
+          rangeHeader,
+          fileStat.size
+        );
+
+      if (!range) {
+        res.writeHead(
+          416,
+          {
+            'Content-Range':
+              `bytes */${fileStat.size}`,
+
+            'Accept-Ranges':
+              'bytes',
+
+            'Cache-Control':
+              'no-store'
+          }
+        );
+
+        res.end();
+        return;
+      }
+
+      const length =
+        range.end -
+        range.start +
+        1;
+
+      res.writeHead(
+        206,
+        {
+          ...headers,
+
+          'Content-Range':
+            `bytes ${range.start}-${range.end}/${fileStat.size}`,
+
+          'Content-Length':
+            length
+        }
+      );
+
+      createReadStream(
+        path,
+        {
+          start: range.start,
+          end: range.end
+        }
+      ).pipe(res);
+
+      return;
+    }
+  }
+
   res.writeHead(
     200,
     {
-      'Content-Type': type,
+      ...headers,
 
       'Content-Length':
-        fileStat.size,
-
-      'Content-Disposition':
-        `attachment; filename="clipcraft-${kind}.${name.split('.').at(-1)}"`,
-
-      'Cache-Control':
-        'no-store',
-
-      'X-Content-Type-Options':
-        'nosniff'
+        fileStat.size
     }
   );
 
@@ -1054,10 +1258,13 @@ const server = http.createServer(
       return;
     }
 
-    const path = new URL(
+    const requestUrl = new URL(
       req.url || '/',
       'http://localhost'
-    ).pathname;
+    );
+
+    const path =
+      requestUrl.pathname;
 
     const clientKeys =
       readClientKeys(req);
@@ -1384,9 +1591,11 @@ const server = http.createServer(
           }
 
           return await deliverFile(
+            req,
             res,
             j,
-            match[3]
+            match[3],
+            requestUrl.searchParams.get('download') === '1'
           );
         }
 

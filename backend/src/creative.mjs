@@ -92,6 +92,10 @@ function storyLanguage(language, tone) {
     return `
 US ENGLISH:
 
+ENGLISH STYLE LOCK:
+fast English Shorts explainer,
+not documentary narration.
+
 Energetic, natural, punchy comedy commentary.
 
 Original and visually specific.
@@ -125,6 +129,27 @@ or unrelated personal traits.
 
   return `
 HINDI / DESI COMEDY DIRECTOR:
+
+HINDI STYLE LOCK:
+Chinese-process Hindi Shorts
+style: natural Devanagari,
+desi hook, quick build-up,
+and final visual payoff.
+
+Use fictional names such as
+Basanti, Raju, Kalu or Bunty
+when a person drives the story.
+
+BEAT-SYNC CONTRACT:
+Every line must match the
+current visual beat.
+
+RETENTION DESIGN:
+Hook curiosity early, add one
+question or tension point,
+then pay it off at the end.
+
+Avoid shuddh/formal Hindi.
 
 Write MOSTLY in natural,
 spoken Devanagari Hindi
@@ -324,6 +349,12 @@ export function buildStoryPrompt(
   const isFast =
     voiceStyle === 'fast_explainer';
 
+  const isFacts =
+    voiceStyle === 'facts_explainer';
+
+  const isStory =
+    voiceStyle === 'story_narrator';
+
   // Older ai.mjs sends 7 arguments.
   // Newer ai.mjs sends voiceStyle
   // as the eighth argument.
@@ -347,12 +378,12 @@ export function buildStoryPrompt(
     d * (
       hindi
         ? (
-            isFast
+            isFast || isFacts || isStory
               ? 1.6
               : 1.35
           )
         : (
-            isFast
+            isFast || isFacts || isStory
               ? 1.85
               : 1.55
           )
@@ -363,12 +394,12 @@ export function buildStoryPrompt(
     d * (
       hindi
         ? (
-            isFast
+            isFast || isFacts || isStory
               ? 2.1
               : 1.9
           )
         : (
-            isFast
+            isFast || isFacts || isStory
               ? 2.35
               : 2.05
           )
@@ -448,6 +479,91 @@ ${tone}
 VOICE STYLE:
 ${voiceStyle || 'viral_funny'}
 
+FACTS EXPLAINER STYLE:
+${
+  isFacts
+    ? `
+This selected preset is for odd
+fruit, food, process and facts
+Shorts.
+
+Open with a sharp curiosity hook:
+"This looks normal, but..."
+"Why does this fruit do this?"
+"The weird part is inside..."
+
+Then explain only what the video
+shows, plus safe context from
+research when available.
+
+Use fast, excited, human spoken
+delivery. Keep it punchy, not
+documentary.
+
+Do not force fictional names
+unless real people drive the scene.
+
+Do not invent science, country
+claims, health claims or danger.
+If unsure, say "looks like" or
+"seems like".
+`
+    : `
+Use the selected entertainment
+style while staying grounded in
+visible events.
+`
+}
+
+STORY NARRATOR STYLE:
+${
+  isStory
+    ? `
+This selected preset turns the
+uploaded clip into a short,
+human-feeling story.
+
+Build a mini story arc:
+SETUP -> CHARACTER CHOICE
+-> TENSION -> TURN -> PAYOFF.
+
+Identify visible people only by
+safe broad observable roles:
+woman, man, child, elderly person,
+group, worker, performer, customer,
+friend, parent-like adult.
+
+Never claim a private identity,
+relationship, age, job, religion,
+nationality, illness or intention
+unless clearly visible or stated
+by reliable context.
+
+If a woman, man, child or elderly
+person appears, make the narration
+match their visible action and
+reaction. Use warm story language,
+not clothing inventory.
+
+The voice should feel like a real
+narrator reacting to the current
+moment: curious, emotional, clear,
+and lightly dramatic.
+
+Keep the story synchronized:
+each beat describes what is
+happening now or what the current
+visual is setting up. Do not reveal
+the ending before the final shot.
+Do not reveal the ending before the final shot.
+`
+    : `
+Only use story-style narration
+when the Story Narrator preset
+is selected.
+`
+}
+
 PREVIOUS STORIES TO AVOID:
 
 ${JSON.stringify(
@@ -493,8 +609,7 @@ a REAL final visual event.
 
 Do not spoil the ending early.
 
-7. Write ONE CONTINUOUS
-spoken voiceover.
+7. Write ONE CONTINUOUS spoken voiceover.
 
 Use 3-5 contiguous beats.
 
@@ -520,9 +635,22 @@ Do not invent events or facts.
 11. YOUTUBE METADATA:
 
 Create a specific, honest title
-under 70 characters.
+under 110 characters.
+
+The title must include:
+- 1-3 relevant emojis
+- at least 4 compact hashtags
+  at the end of the title
+
+Use hashtags about the actual
+video, not random trending spam.
 
 DESCRIPTION:
+
+Use the selected video language.
+If language is Hindi, write the
+description in natural Hindi /
+Hinglish using Devanagari.
 
 Line 1:
 Describe the actual funny
@@ -536,7 +664,7 @@ Add 2-3 relevant hashtags.
 
 TAGS:
 
-Generate 6-12 tags related
+Generate 8-12 tags related
 to the actual video.
 
 No irrelevant trending spam.
@@ -608,6 +736,9 @@ export function scriptQualityWarnings(
 
   const total =
     wordCount(speech);
+
+  const hook =
+    clean(script?.hook);
 
   const d = Math.max(
     1,
@@ -683,6 +814,89 @@ export function scriptQualityWarnings(
   ) {
     issues.push(
       'Roast action, not someone’s body or appearance.'
+    );
+  }
+
+  if (
+    hook &&
+    (
+      hook.length > 82 ||
+      wordCount(hook) > 13
+    )
+  ) {
+    issues.push(
+      'Hook is too long: make it a short punchy opening.'
+    );
+  }
+
+  if (
+    /\b(camera shows|we see|is seen|footage depicts|the footage shows|here we see)\b/i
+      .test(speech)
+  ) {
+    issues.push(
+      'Avoid camera log narration; tell the action like a story.'
+    );
+  }
+
+  if (
+    /\b(wearing|shirt|dress|outfit|clothes|jacket|hoodie|sweater|white dress|black shirt|people walking)\b/i
+      .test(speech) ||
+    /(लड़की|युवती|महिला|लड़का|व्यक्ति|लोग|शर्ट|हुडी|स्वेटर|पहने)/
+      .test(speech)
+  ) {
+    issues.push(
+      'Do not narrate clothes or people lists; focus on the action.'
+    );
+  }
+
+  if (
+    /\b(earlier|previous|before this moment|already shown|old scene|still talking about)\b/i
+      .test(speech)
+  ) {
+    issues.push(
+      'Do not lag behind the edit; each line should match the current visual.'
+    );
+  }
+
+  if (
+    language !== 'hi' &&
+    /\b(is placed|process begins|adjusted carefully|process finishes|demonstrates how|footage depicts)\b/i
+      .test(speech)
+  ) {
+    issues.push(
+      'Retention structure is too flat; add curiosity, escalation and payoff.'
+    );
+  }
+
+  if (
+    language !== 'hi' &&
+    /\b(this video demonstrates|footage depicts|demonstrates how)\b/i
+      .test(speech)
+  ) {
+    issues.push(
+      'English voiceover sounds documentary; make it punchy and human.'
+    );
+  }
+
+  if (
+    language === 'hi' &&
+    /(प्रक्रिया|प्रदर्शित|दृश्य|वास्तविकता|अपेक्षा|परिवर्तन|तत्पश्चात|समाप्त|निकाला गया|तोड़ा गया|सावधानी से)/
+      .test(speech)
+  ) {
+    issues.push(
+      'Hindi is too formal; use bol-chaal viral Shorts language.'
+    );
+  }
+
+  if (
+    language === 'hi' &&
+    /(लड़की|युवती|महिला|लड़का|व्यक्ति|बंदा|बंदी)/
+      .test(speech) &&
+    !/(बसंती|चिंकी|पिंकी|गुड्डी|बबली|राजू|कालू|बंटी|पप्पू|गोलू)/
+      .test(speech)
+  ) {
+    issues.push(
+      'Give the main person a funny nickname instead of stiff labels.'
     );
   }
 
@@ -769,7 +983,7 @@ export function rankScripts(
 
         if (
           !title ||
-          title.length > 70
+          title.length > 110
         ) {
           score -= 10;
         }
@@ -807,7 +1021,8 @@ export function rankScripts(
 // ==========================================
 
 export function applyHindiNarratorStyle(
-  script
+  script,
+  evidence = {}
 ) {
   if (
     script?.language !== 'hi'
@@ -815,7 +1030,7 @@ export function applyHindiNarratorStyle(
     return script;
   }
 
-  const improve = value =>
+  const oldImprove = value =>
     clean(value)
       .replace(
         /तत्पश्चात/g,
@@ -829,6 +1044,48 @@ export function applyHindiNarratorStyle(
         /इस दृश्य में/g,
         'यहाँ'
       );
+
+  const context = clean(
+    JSON.stringify(evidence)
+  );
+
+  const female =
+    /(girl|woman|female|lady|लड़की|महिला|युवती)/i
+      .test(context);
+
+  const male =
+    /(boy|man|male|guy|लड़का|आदमी|बंदा)/i
+      .test(context);
+
+  const nickname = female
+    ? 'बसंती'
+    : male
+      ? 'राजू'
+      : 'बंटी';
+
+  const improve = value => {
+    let text = oldImprove(value)
+      .replace(/तत्पश्चात/g, 'फिर')
+      .replace(/उक्त व्यक्ति/g, nickname)
+      .replace(/इस दृश्य में/g, 'यहां')
+      .replace(/दृश्य/g, 'सीन')
+      .replace(/प्रक्रिया/g, 'जुगाड़')
+      .replace(/प्रदर्शित करती है/g, 'कर रही है')
+      .replace(/प्रदर्शित करता है/g, 'कर रहा है')
+      .replace(/परिवर्तन/g, 'बदलाव')
+      .replace(/समाप्त होता है/g, 'खत्म होता है')
+      .replace(/सफलता से/g, 'मस्त तरीके से')
+      .replace(/युवती|महिला|लड़की/g, nickname)
+      .replace(/युवक|लड़का|आदमी|व्यक्ति/g, nickname);
+
+    if (
+      !/(अरे|भाई|सीन|जुगाड़|कांड|ओहो)/.test(text)
+    ) {
+      text = `अरे ${text}`;
+    }
+
+    return text;
+  };
 
   return {
     ...script,
@@ -871,12 +1128,46 @@ export function metadataWarnings(
           .filter(Boolean)
       : [];
 
+  const titleHashtags =
+    title.match(/#[\p{L}\p{N}_]+/gu) || [];
+
+  const emojiCount = (
+    title.match(/\p{Extended_Pictographic}/gu) ||
+    []
+  ).length;
+
   if (
     !title ||
-    title.length > 70
+    title.length > 110
   ) {
     warnings.push(
-      'Title must be specific and under 70 characters.'
+      'Title must be specific and under 110 characters.'
+    );
+  }
+
+  if (
+    titleHashtags.length < 4
+  ) {
+    warnings.push(
+      'Add at least 4 relevant hashtags in the YouTube title.'
+    );
+  }
+
+  if (
+    emojiCount < 1 ||
+    emojiCount > 3
+  ) {
+    warnings.push(
+      'Title must use 1-3 relevant emojis.'
+    );
+  }
+
+  if (
+    /\b(watch the ending|you won't believe|shocking|viral shorts video|amazing viral|must watch)\b/i
+      .test(title + ' ' + description)
+  ) {
+    warnings.push(
+      'Avoid generic clickbait; make metadata specific to this video.'
     );
   }
 
@@ -887,11 +1178,23 @@ export function metadataWarnings(
   }
 
   if (
-    tags.length < 5 ||
+    tags.length < 8 ||
     tags.length > 12
   ) {
     warnings.push(
-      'Prefer 6-12 topic-specific tags.'
+      'Prefer 8-12 focused tags.'
+    );
+  }
+
+  const descriptionHashtags =
+    description.match(/#[\p{L}\p{N}_]+/gu) || [];
+
+  if (
+    description &&
+    descriptionHashtags.length !== 3
+  ) {
+    warnings.push(
+      'Description should include exactly 3 relevant hashtags.'
     );
   }
 
@@ -911,13 +1214,11 @@ export function metadataWarnings(
 
   if (
     language === 'hi' &&
-    title &&
-    !/[\u0900-\u097f]/.test(
-      title + description
-    )
+    description &&
+    !/[\u0900-\u097f]/.test(description)
   ) {
     warnings.push(
-      'Hindi channel metadata should use natural Hindi.'
+      'Hindi description must use natural Hindi/Hinglish in Devanagari.'
     );
   }
 

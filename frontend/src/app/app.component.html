@@ -1,96 +1,1952 @@
 <div class="shell">
+
   <aside class="sidebar">
-    <div class="logo"><div class="logo-mark"><span>▶</span></div><div>clip<span class="logo-strong">craft</span><small>STUDIO PRO</small></div></div>
-    <div class="nav-label">WORKSPACE</div>
-    <a class="nav active" href="#studio"><span class="nav-icon">▣</span> Studio <span class="nav-end">✦</span></a>
-    <a class="nav" href="#settings"><span class="nav-icon">◫</span> Settings</a>
-    <a class="nav" href="#output"><span class="nav-icon">▤</span> Results</a>
-    <div class="sidebar-space"></div>
-    <div class="side-tip"><div class="side-glow"></div><span class="tip-star">✧</span><strong>Bring your videos to life</strong><p>Scene-aware scripts, natural AI voiceovers and polished shorts.</p></div>
-    <div class="side-footer"><span class="pulse" [class.connected]="backendConnected"></span> {{backendConnected ? 'Local API connected' : 'Connect your backend'}} <small>v1.0</small></div>
-  </aside>
 
-  <main class="workspace" id="studio">
-    <header class="topbar"><div><span class="crumb">Workspace</span><span class="slash">/</span><strong> AI Video Studio</strong></div><div class="header-right"><span class="small-tag">✦ AI-POWERED EDITOR</span><div class="avatar">CC</div></div></header>
-
-    <section class="hero">
-      <div class="hero-copy"><span class="eyebrow"><span class="pink-dot"></span> YOUR CREATIVE CO-PILOT</span><h1>Turn any clip into a <em>story worth watching.</em></h1><p>Upload your footage. Gemini studies the scenes, Cartesia brings your words to life, and ClipCraft handles the rest.</p><div class="hero-badges"><span>✦ Scene-aware scripts</span><span>◉ Real voiceovers</span><span>↗ Shorts-ready</span></div></div>
-      <div class="hero-decoration" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="hero-phone"><div class="phone-play">▶</div><div class="phone-caption"></div><div class="phone-caption short"></div><div class="phone-bottom">✦ SHORTS</div></div><span class="star st1">✦</span><span class="star st2">✳</span></div>
-    </section>
-
-    <div class="notice" *ngIf="apiError"><span>⚠</span> {{apiError}} <button type="button" (click)="apiError='';checkHealth()">Retry</button></div>
-    <div class="notice warm" *ngIf="health && !ready"><span>🔑</span> {{ !health.geminiConfigured || !health.cartesiaConfigured || !health.ffmpeg ? 'Check API keys in backend/.env and FFmpeg installation.' : fetchingVoices ? 'Loading Cartesia voices for both languages...' : 'Select an available voice for the chosen language.' }} <button type="button" (click)="checkHealth()">Recheck</button></div>
-    <div class="notice success" *ngIf="health && ready"><span>✓</span> Gemini configured · Cartesia configured · FFmpeg {{health.ffmpeg?'ready':'missing'}} · Max {{health.maxDuration}}s / {{health.maxUploadMB}} MB</div>
-
-    <div class="work-grid">
-      <div class="left-stack">
-        <section class="panel upload-panel">
-          <div class="section-title"><div><span class="section-number">01</span><h2>Upload your footage</h2><p>Let's start with your original video.</p></div><span class="step-status">STEP 1 OF 3</span></div>
-          <input #fileInput type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mkv" (change)="browse($event)" hidden>
-          <div class="upload-box" [class.dragging]="dragging" (dragover)="$event.preventDefault();dragging=true" (dragleave)="dragging=false" (drop)="dropped($event)" (click)="fileInput.click()" role="button" tabindex="0" (keyup.enter)="fileInput.click()">
-            <ng-container *ngIf="!file"><div class="upload-icon">⇧</div><h3>Drop your video here</h3><p>or <strong>browse your files</strong> to get started</p><small>MP4, MOV, WebM, MKV · up to {{health?.maxUploadMB || 80}} MB</small></ng-container>
-            <ng-container *ngIf="file"><div class="uploaded"><span class="upload-icon small">✓</span><div><h3>{{file.name}}</h3><p>{{bytes(file.size)}} · Click to change video</p></div><span class="filecheck">READY</span></div></ng-container>
-          </div>
-          <div class="video-source" *ngIf="localPreview"><video [src]="localPreview" controls playsinline preload="metadata"></video><div class="source-info">SOURCE PREVIEW <span>Video audio will be replaced by narration by default</span></div></div>
-          <div class="micro-note"><span>◈</span> Your upload is processed locally on your Node server. The clip is sent to Gemini for scene analysis; original source is not automatically deleted from third-party platforms.</div>
-        </section>
-
-        <section class="panel settings-panel" id="settings">
-          <div class="section-title"><div><span class="section-number">02</span><h2>Make it yours</h2><p>Fine-tune your video's personality.</p></div><span class="step-status">STEP 2 OF 3</span></div>
-          <div class="field"><label>Video language <span class="hint">Narration + metadata</span></label><div class="choice"><button type="button" [class.selected]="options.language==='en'" (click)="selectLanguage('en')">🇺🇸 English (US)</button><button type="button" [class.selected]="options.language==='hi'" (click)="selectLanguage('hi')">🇮🇳 Hindi</button></div></div>
-          <div class="field"><label>Gemini video-analysis model <span class="hint">Free-tier options (usage limits apply)</span></label><select [(ngModel)]="options.geminiModel"><option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite · Free · Fast</option><option value="gemini-3.8-flash">Gemini 3.8 Flash · Free · Higher capability</option><option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite · Free · Alternative</option></select><small class="control-help">This selects the model that watches your video and writes the script. Cartesia still generates the voice. Free access depends on your Google API project limits.</small></div>
-          <div class="field key-box"><div class="field-heading"><label>API keys <span class="hint">Saved in this browser</span></label><button type="button" class="text-button" (click)="showKeys=!showKeys">{{showKeys ? 'Hide keys' : 'Edit keys'}}</button></div><div *ngIf="showKeys" class="key-grid"><input [(ngModel)]="apiKeys.geminiKey" type="password" autocomplete="off" placeholder="Gemini API key"><input [(ngModel)]="apiKeys.cartesiaKey" type="password" autocomplete="off" placeholder="Cartesia API key"><button type="button" class="save-key-btn" (click)="saveKeys()">Save keys</button><button type="button" class="clear-key-btn" (click)="clearKeys()">Clear</button></div><small class="control-help">Keys are stored only in this browser's localStorage and sent to your backend for generation. Backend .env keys still work as fallback.</small></div>
-          <div class="field"><label>Storytelling vibe</label><div class="mood-grid"><button type="button" [class.selected]="options.tone==='funny'" (click)="options.tone='funny'"><span>😄</span><strong>Funny</strong><small>Witty, playful</small></button><button type="button" [class.selected]="options.tone==='curious'" (click)="options.tone='curious'"><span>🔎</span><strong>Curious</strong><small>Wow moments</small></button><button type="button" [class.selected]="options.tone==='wholesome'" (click)="options.tone='wholesome'"><span>✨</span><strong>Wholesome</strong><small>Feel-good</small></button></div></div>
-          <div class="field"><label>Voiceover style <span class="hint">Script rhythm + TTS energy</span></label><div class="mood-grid voice-grid"><button type="button" [class.selected]="options.voiceStyle==='viral_funny'" (click)="options.voiceStyle='viral_funny'"><span>VF</span><strong>Viral Funny</strong><small>Fast, playful</small></button><button type="button" [class.selected]="options.voiceStyle==='fast_explainer'" (click)="options.voiceStyle='fast_explainer'"><span>FX</span><strong>Fast Explainer</strong><small>Sharp, clear</small></button><button type="button" [class.selected]="options.voiceStyle==='dramatic_reveal'" (click)="options.voiceStyle='dramatic_reveal'"><span>DR</span><strong>Dramatic Reveal</strong><small>Suspense, payoff</small></button><button type="button" [class.selected]="options.voiceStyle==='clean'" (click)="options.voiceStyle='clean'"><span>CN</span><strong>Clean Natural</strong><small>Less hype</small></button></div><small class="control-help">For funny Shorts like your samples, keep Viral Funny selected. It makes the script more reactive and Cartesia delivery faster/louder.</small></div>
-          <div class="field"><div class="field-heading"><label>{{options.language === 'hi' ? 'Hindi Cartesia voices' : 'English Cartesia voices'}}</label><button type="button" class="text-button" (click)="loadVoices()" [disabled]="fetchingVoices">{{fetchingVoices ? 'Loading…' : '↻ Refresh voices'}}</button></div><select [(ngModel)]="options.voiceId" [disabled]="fetchingVoices || !filteredVoices.length"><option *ngIf="!filteredVoices.length" value="">No matching voices found</option><option *ngFor="let voice of filteredVoices" [ngValue]="voice.id">{{voice.name}} · {{voice.locale}} {{voice.native ? '(native)' : '(multilingual)'}}</option></select><small class="control-help">Only voices supporting the selected language appear. Native-accent voices are listed first. For Hindi, choose hi-IN native when available.</small></div>
-          <div class="rule"></div>
-          <div class="field"><label>Channel watermark <span class="hint">Visible on exported video</span></label><div class="watermark-control"><input [(ngModel)]="options.watermark" type="text" maxlength="35" placeholder="YourChannelName"><div class="watermark-sample" [style.opacity]="options.opacity/100">{{options.watermark||'Your channel'}}</div></div></div>
-          <div class="field"><div class="field-heading"><label>Watermark opacity</label><strong class="setting-number">{{options.opacity}}%</strong></div><input [(ngModel)]="options.opacity" type="range" min="0" max="100" step="1"><div class="range-label"><span>Subtle</span><span>Bold</span></div></div>
-          <div class="rule"></div>
-          <div class="switch-row"><div><strong>Animated captions</strong><p>Short, readable timed subtitles</p></div><label class="switch"><input type="checkbox" [(ngModel)]="options.captions"><span></span></label></div>
-          <div class="switch-row"><div><strong>Like, Subscribe & Bell animation</strong><p>Animated visual call-to-action</p></div><label class="switch"><input type="checkbox" [(ngModel)]="options.cta"><span></span></label></div>
-          <div class="switch-row"><div><strong>Cover existing subtitles</strong><p>Enable only if the original video already has captions burned in. Covers the lower text band and may hide some footage.</p></div><label class="switch"><input type="checkbox" [(ngModel)]="options.coverOriginalCaptions"><span></span></label></div>
-          <button class="advanced-trigger" type="button" (click)="showAdvanced=!showAdvanced">Advanced video controls <span>{{showAdvanced?'−':'+'}}</span></button>
-          <div *ngIf="showAdvanced" class="advanced-content"><div class="field"><label>Frame fit</label><select [(ngModel)]="options.fit"><option value="fill">Fill vertical frame (center crop)</option><option value="contain">Contain with padding (no crop)</option></select></div><div class="switch-row"><div><strong>Keep low original background audio</strong><p>For ambient sounds you have rights to use</p></div><label class="switch"><input type="checkbox" [(ngModel)]="options.originalAudio"><span></span></label></div></div>
-        </section>
+    <div class="logo">
+      <div class="logo-mark">
+        <span>▶</span>
       </div>
 
-      <div class="right-stack">
-        <section class="panel launch-panel"><div class="section-title"><div><span class="section-number">03</span><h2>Create your Short</h2><p>Gemini + Cartesia + FFmpeg</p></div></div><div class="pipeline"><div><span class="pipeline-icon p1">◎</span><span><strong>Understand every scene</strong><small>Gemini watches the whole clip and remembers its key moments</small></span><i>01</i></div><div class="pipeline-line"></div><div><span class="pipeline-icon p2">♫</span><span><strong>Write & narrate</strong><small>A fresh hook, context and grounded payoff</small></span><i>02</i></div><div class="pipeline-line"></div><div><span class="pipeline-icon p3">▧</span><span><strong>Render & package</strong><small>Video + captions + posting kit</small></span><i>03</i></div></div>
-          <button class="generate-btn" type="button" (click)="create(false)" [disabled]="!file || !ready || busy || processing"><span>✦</span> {{busy?'Uploading video…':processing?'Working on your video…':'Generate Complete Short'}} <span class="arrow">↗</span></button>
-          <button class="review-btn" type="button" (click)="create(true)" [disabled]="!file || !ready || busy || processing">✎ Analyze & review script first</button>
-          <p class="launch-footnote">Regenerate Script uses Gemini text calls; a new video render uses Cartesia voice credits. Quotas and charges depend on your provider account. No promise of unlimited free generation.</p>
-        </section>
-
-        <section *ngIf="job" class="panel job-panel" id="output">
-          <div class="job-head"><span class="job-dot" [class.complete]="job.status==='done'"></span><div><h3>{{job.status==='done'?'Your Short is ready!':job.status==='regenerating'?'Writing a different script…':job.status==='review'?'Review your AI script':job.status==='error'?'Something needs attention':'Your video is cooking…'}}</h3><p>{{job.step}}</p></div><b>{{job.percent | number:'1.0-0'}}%</b></div>
-          <div class="progress-track"><div class="progress-fill" [style.width.%]="job.percent"></div></div><div *ngIf="job.error" class="error-details">{{job.error}}</div>
-          <div *ngIf="job.status==='done'" class="results-video"><video [src]="downloadUrl" controls playsinline preload="metadata"></video><a class="download-btn" [href]="downloadUrl" download>↓ Download MP4 video</a><div class="download-secondary"><a [href]="API_LINK(job.captionsUrl)" download>↓ Captions SRT</a><a [href]="API_LINK(job.metadataUrl)" download>↓ Publishing kit</a></div></div>
-        </section>
-
-        <section *ngIf="job?.script" class="panel script-panel"><div class="section-title"><div><span class="section-number">✦</span><h2>AI Creative Kit</h2><p>Review, regenerate or edit original narration and metadata</p></div></div>
-          <div class="story-actions">
-            <div class="story-revision">Story version {{job?.scriptRevision || 1}} · New script uses saved visual analysis</div>
-            <button class="regenerate-btn" type="button" (click)="regenerateScript()"
-              [disabled]="!canRegenerate">
-              <span aria-hidden="true">↻</span>
-              {{ job?.status === 'regenerating' ? 'Rewriting script…' : 'Regenerate Script — New Story' }}
-            </button>
-            <p>Creates another hook and narration for this upload without regenerating the voice/video. Check the facts and press Render to apply.</p>
-          </div>
-          <div class="script-hook"><small>VIDEO UNDERSTANDING</small><p>{{job?.script?.summary}}</p><small>HOOK</small><h3>“{{job?.script?.hook}}”</h3></div>
-          <div class="creative-label"><strong>Scene-by-scene narration</strong><button type="button" (click)="copy(fullScript,'Script')">Copy full script ↗</button></div>
-          <div class="beat" *ngFor="let b of job?.script?.beats; let i=index"><div class="beat-time">{{seconds(b.start)}} – {{seconds(b.end)}}</div><textarea [(ngModel)]="b.text" rows="2" maxlength="400" [disabled]="processing"></textarea></div>
-          <div class="creative-label"><strong>YouTube title</strong><button type="button" (click)="copy(job?.script?.metadata?.title || '', 'Title')">Copy ↗</button></div><textarea class="meta-input" [(ngModel)]="job!.script!.metadata.title" rows="2" [disabled]="processing"></textarea>
-          <div class="creative-label"><strong>Description</strong><button type="button" (click)="copy(job?.script?.metadata?.description || '', 'Description')">Copy ↗</button></div><textarea class="meta-input" [(ngModel)]="job!.script!.metadata.description" rows="4" [disabled]="processing"></textarea>
-          <div class="creative-label"><strong>Relevant tags</strong><button type="button" (click)="copy(tags, 'Tags')">Copy ↗</button></div><textarea class="meta-input" [(ngModel)]="tags" rows="2" [disabled]="processing"></textarea>
-          <button *ngIf="job?.status==='review' || job?.status==='done' || job?.status==='error'" class="render-btn" type="button" (click)="renderEdits()" [disabled]="processing || busy">✦ {{job?.status==='review'?'Render Edited Video':'Re-render With My Edits'}}</button>
-          <small class="caution">Check factual claims and reuse rights before publishing; changes after video render require re-rendering.</small>
-        </section>
-        <section class="panel facts-panel"><div class="icon-light">✷</div><h3>Make it scroll-stopping</h3><p>Strong openings, honest visual observations and a short payoff help make a clip engaging. The AI suggests ideas, but views and virality can never be guaranteed.</p><span>CREATIVE TIP · KEEP IT ORIGINAL</span></section>
+      <div>
+        clip<span class="logo-strong">craft</span>
+        <small>STUDIO PRO</small>
       </div>
     </div>
-    <footer class="app-footer">CLIPCRAFT STUDIO · LOCAL-FIRST VIDEO EDITOR <span>Made for storytellers, not recycled uploads · Only process footage you have rights to use.</span></footer>
-    <div class="toast" *ngIf="toast" role="status">✓ {{toast}} <button type="button" (click)="toast=''">×</button></div>
+
+    <div class="nav-label">
+      WORKSPACE
+    </div>
+
+    <a
+      class="nav active"
+      href="#studio"
+    >
+      <span class="nav-icon">▣</span>
+      Studio
+      <span class="nav-end">✦</span>
+    </a>
+
+    <a
+      class="nav"
+      href="#settings"
+    >
+      <span class="nav-icon">◫</span>
+      Settings
+    </a>
+
+    <a
+      class="nav"
+      href="#output"
+    >
+      <span class="nav-icon">▤</span>
+      Results
+    </a>
+
+    <div class="sidebar-space"></div>
+
+    <div class="side-tip">
+      <div class="side-glow"></div>
+
+      <span class="tip-star">
+        ✧
+      </span>
+
+      <strong>
+        Bring your videos to life
+      </strong>
+
+      <p>
+        Scene-aware scripts,
+        natural AI voiceovers
+        and polished shorts.
+      </p>
+    </div>
+
+    <div class="side-footer">
+
+      <span
+        class="pulse"
+        [class.connected]="backendConnected"
+      ></span>
+
+      {{
+        backendConnected
+          ? 'Local API connected'
+          : 'Connect your backend'
+      }}
+
+      <small>
+        v1.0
+      </small>
+
+    </div>
+
+  </aside>
+
+
+  <main
+    class="workspace"
+    id="studio"
+  >
+
+    <!-- =============================== -->
+    <!-- TOP BAR -->
+    <!-- =============================== -->
+
+    <header class="topbar">
+
+      <div>
+
+        <span class="crumb">
+          Workspace
+        </span>
+
+        <span class="slash">
+          /
+        </span>
+
+        <strong>
+          AI Video Studio
+        </strong>
+
+      </div>
+
+      <div class="header-right">
+
+        <span class="small-tag">
+          ✦ AI-POWERED EDITOR
+        </span>
+
+        <div class="avatar">
+          CC
+        </div>
+
+      </div>
+
+    </header>
+
+
+    <!-- =============================== -->
+    <!-- HERO -->
+    <!-- =============================== -->
+
+    <section class="hero">
+
+      <div class="hero-copy">
+
+        <span class="eyebrow">
+
+          <span class="pink-dot"></span>
+
+          YOUR CREATIVE CO-PILOT
+
+        </span>
+
+        <h1>
+          Turn any clip into a
+          <em>
+            story worth watching.
+          </em>
+        </h1>
+
+        <p>
+          Upload your footage.
+          Gemini studies the scenes,
+          Cartesia brings your words
+          to life, and ClipCraft
+          handles the rest.
+        </p>
+
+        <div class="hero-badges">
+
+          <span>
+            ✦ Scene-aware scripts
+          </span>
+
+          <span>
+            ◉ Real voiceovers
+          </span>
+
+          <span>
+            ↗ Shorts-ready
+          </span>
+
+        </div>
+
+      </div>
+
+
+      <div
+        class="hero-decoration"
+        aria-hidden="true"
+      >
+
+        <div class="orbit orbit-one"></div>
+
+        <div class="orbit orbit-two"></div>
+
+        <div class="hero-phone">
+
+          <div class="phone-play">
+            ▶
+          </div>
+
+          <div class="phone-caption"></div>
+
+          <div class="phone-caption short"></div>
+
+          <div class="phone-bottom">
+            ✦ SHORTS
+          </div>
+
+        </div>
+
+        <span class="star st1">
+          ✦
+        </span>
+
+        <span class="star st2">
+          ✳
+        </span>
+
+      </div>
+
+    </section>
+
+
+    <!-- =============================== -->
+    <!-- API ERROR -->
+    <!-- =============================== -->
+
+    <div
+      class="notice"
+      *ngIf="apiError"
+    >
+
+      <span>
+        ⚠
+      </span>
+
+      {{apiError}}
+
+      <button
+        type="button"
+        (click)="apiError='';checkHealth()"
+      >
+        Retry
+      </button>
+
+    </div>
+
+
+    <!-- =============================== -->
+    <!-- API NOT READY -->
+    <!-- =============================== -->
+
+    <div
+      class="notice warm"
+      *ngIf="health && !ready"
+    >
+
+      <span>
+        🔑
+      </span>
+
+      {{
+        !health.geminiConfigured ||
+        !health.cartesiaConfigured ||
+        !health.ffmpeg
+
+          ? 'Check API keys in backend/.env and FFmpeg installation.'
+
+          : fetchingVoices
+
+            ? 'Loading Cartesia voices for both languages...'
+
+            : 'Select an available voice for the chosen language.'
+      }}
+
+      <button
+        type="button"
+        (click)="checkHealth()"
+      >
+        Recheck
+      </button>
+
+    </div>
+
+
+    <!-- =============================== -->
+    <!-- API READY -->
+    <!-- =============================== -->
+
+    <div
+      class="notice success"
+      *ngIf="health && ready"
+    >
+
+      <span>
+        ✓
+      </span>
+
+      Gemini configured ·
+      Cartesia configured ·
+      FFmpeg
+      {{health.ffmpeg ? 'ready' : 'missing'}}
+      · Max
+      {{health.maxDuration}}s /
+      {{health.maxUploadMB}} MB
+
+    </div>
+
+
+    <!-- =============================== -->
+    <!-- MAIN GRID -->
+    <!-- =============================== -->
+
+    <div class="work-grid">
+
+
+      <!-- ============================= -->
+      <!-- LEFT -->
+      <!-- ============================= -->
+
+      <div class="left-stack">
+
+
+        <!-- =========================== -->
+        <!-- UPLOAD -->
+        <!-- =========================== -->
+
+        <section class="panel upload-panel">
+
+          <div class="section-title">
+
+            <div>
+
+              <span class="section-number">
+                01
+              </span>
+
+              <h2>
+                Upload your footage
+              </h2>
+
+              <p>
+                Let's start with your
+                original video.
+              </p>
+
+            </div>
+
+            <span class="step-status">
+              STEP 1 OF 3
+            </span>
+
+          </div>
+
+
+          <input
+            #fileInput
+            type="file"
+            accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mkv"
+            (change)="browse($event)"
+            hidden
+          >
+
+
+          <div
+            class="upload-box"
+            [class.dragging]="dragging"
+            (dragover)="$event.preventDefault();dragging=true"
+            (dragleave)="dragging=false"
+            (drop)="dropped($event)"
+            (click)="fileInput.click()"
+            role="button"
+            tabindex="0"
+            (keyup.enter)="fileInput.click()"
+          >
+
+            <ng-container *ngIf="!file">
+
+              <div class="upload-icon">
+                ⇧
+              </div>
+
+              <h3>
+                Drop your video here
+              </h3>
+
+              <p>
+                or
+                <strong>
+                  browse your files
+                </strong>
+                to get started
+              </p>
+
+              <small>
+                MP4, MOV, WebM, MKV ·
+                up to
+                {{health?.maxUploadMB || 80}}
+                MB
+              </small>
+
+            </ng-container>
+
+
+            <ng-container *ngIf="file">
+
+              <div class="uploaded">
+
+                <span class="upload-icon small">
+                  ✓
+                </span>
+
+                <div>
+
+                  <h3>
+                    {{file.name}}
+                  </h3>
+
+                  <p>
+                    {{bytes(file.size)}}
+                    · Click to change video
+                  </p>
+
+                </div>
+
+                <span class="filecheck">
+                  READY
+                </span>
+
+              </div>
+
+            </ng-container>
+
+          </div>
+
+
+          <div
+            class="video-source"
+            *ngIf="localPreview"
+          >
+
+            <video
+              [src]="localPreview"
+              controls
+              playsinline
+              preload="metadata"
+            ></video>
+
+            <div class="source-info">
+
+              SOURCE PREVIEW
+
+              <span>
+                Video audio will be
+                replaced by narration
+                by default
+              </span>
+
+            </div>
+
+          </div>
+
+
+          <div class="micro-note">
+
+            <span>
+              ◈
+            </span>
+
+            Your upload is processed
+            locally on your Node server.
+            The clip is sent to Gemini
+            for scene analysis; original
+            source is not automatically
+            deleted from third-party
+            platforms.
+
+          </div>
+
+        </section>
+
+
+        <!-- =========================== -->
+        <!-- SETTINGS -->
+        <!-- =========================== -->
+
+        <section
+          class="panel settings-panel"
+          id="settings"
+        >
+
+          <div class="section-title">
+
+            <div>
+
+              <span class="section-number">
+                02
+              </span>
+
+              <h2>
+                Make it yours
+              </h2>
+
+              <p>
+                Fine-tune your video's
+                personality.
+              </p>
+
+            </div>
+
+            <span class="step-status">
+              STEP 2 OF 3
+            </span>
+
+          </div>
+
+
+          <!-- LANGUAGE -->
+
+          <div class="field">
+
+            <label>
+
+              Video language
+
+              <span class="hint">
+                Narration + metadata
+              </span>
+
+            </label>
+
+            <div class="choice">
+
+              <button
+                type="button"
+                [class.selected]="options.language==='en'"
+                (click)="selectLanguage('en')"
+              >
+                🇺🇸 English (US)
+              </button>
+
+              <button
+                type="button"
+                [class.selected]="options.language==='hi'"
+                (click)="selectLanguage('hi')"
+              >
+                🇮🇳 Hindi
+              </button>
+
+            </div>
+
+          </div>
+
+
+          <!-- GEMINI MODEL -->
+
+          <div class="field">
+
+            <label>
+
+              Gemini video-analysis model
+
+              <span class="hint">
+                Free-tier options
+                (usage limits apply)
+              </span>
+
+            </label>
+
+            <select
+              [(ngModel)]="options.geminiModel"
+            >
+
+              <option value="gemini-3.5-flash-lite">
+                Gemini 3.5 Flash-Lite ·
+                Free · Fast
+              </option>
+
+              <option value="gemini-3.8-flash">
+                Gemini 3.8 Flash ·
+                Free · Higher capability
+              </option>
+
+              <option value="gemini-3.1-flash-lite">
+                Gemini 3.1 Flash-Lite ·
+                Free · Alternative
+              </option>
+
+            </select>
+
+            <small class="control-help">
+
+              This selects the model
+              that watches your video
+              and writes the script.
+              Cartesia still generates
+              the voice. Free access
+              depends on your Google
+              API project limits.
+
+            </small>
+
+          </div>
+
+
+          <!-- API KEYS -->
+
+          <div class="field key-box">
+
+            <div class="field-heading">
+
+              <label>
+
+                API keys
+
+                <span class="hint">
+                  Saved in this browser
+                </span>
+
+              </label>
+
+              <button
+                type="button"
+                class="text-button"
+                (click)="showKeys=!showKeys"
+              >
+                {{
+                  showKeys
+                    ? 'Hide keys'
+                    : 'Edit keys'
+                }}
+              </button>
+
+            </div>
+
+
+            <div
+              *ngIf="showKeys"
+              class="key-grid"
+            >
+
+              <input
+                [(ngModel)]="apiKeys.geminiKey"
+                type="password"
+                autocomplete="off"
+                placeholder="Gemini API key"
+              >
+
+              <input
+                [(ngModel)]="apiKeys.cartesiaKey"
+                type="password"
+                autocomplete="off"
+                placeholder="Cartesia API key"
+              >
+
+              <button
+                type="button"
+                class="save-key-btn"
+                (click)="saveKeys()"
+              >
+                Save keys
+              </button>
+
+              <button
+                type="button"
+                class="clear-key-btn"
+                (click)="clearKeys()"
+              >
+                Clear
+              </button>
+
+            </div>
+
+            <small class="control-help">
+
+              Keys are stored only in
+              this browser's localStorage
+              and sent to your backend
+              for generation. Backend
+              .env keys still work as
+              fallback.
+
+            </small>
+
+          </div>
+
+
+          <!-- STORY VIBE -->
+
+          <div class="field">
+
+            <label>
+              Storytelling vibe
+            </label>
+
+            <div class="mood-grid">
+
+              <button
+                type="button"
+                [class.selected]="options.tone==='funny'"
+                (click)="options.tone='funny'"
+              >
+
+                <span>
+                  😄
+                </span>
+
+                <strong>
+                  Funny
+                </strong>
+
+                <small>
+                  Witty, playful
+                </small>
+
+              </button>
+
+
+              <button
+                type="button"
+                [class.selected]="options.tone==='curious'"
+                (click)="options.tone='curious'"
+              >
+
+                <span>
+                  🔎
+                </span>
+
+                <strong>
+                  Curious
+                </strong>
+
+                <small>
+                  Wow moments
+                </small>
+
+              </button>
+
+
+              <button
+                type="button"
+                [class.selected]="options.tone==='wholesome'"
+                (click)="options.tone='wholesome'"
+              >
+
+                <span>
+                  ✨
+                </span>
+
+                <strong>
+                  Wholesome
+                </strong>
+
+                <small>
+                  Feel-good
+                </small>
+
+              </button>
+
+            </div>
+
+          </div>
+
+
+          <!-- VOICE STYLE -->
+
+          <div class="field">
+
+            <label>
+
+              Voiceover style
+
+              <span class="hint">
+                Script rhythm + TTS energy
+              </span>
+
+            </label>
+
+
+            <div class="mood-grid voice-grid">
+
+              <button
+                type="button"
+                [class.selected]="options.voiceStyle==='viral_funny'"
+                (click)="options.voiceStyle='viral_funny'"
+              >
+
+                <span>
+                  VF
+                </span>
+
+                <strong>
+                  Viral Funny
+                </strong>
+
+                <small>
+                  Fast, playful
+                </small>
+
+              </button>
+
+
+              <button
+                type="button"
+                [class.selected]="options.voiceStyle==='facts_explainer'"
+                (click)="options.voiceStyle='facts_explainer'"
+              >
+
+                <span>
+                  FE
+                </span>
+
+                <strong>
+                  Facts Explainer
+                </strong>
+
+                <small>
+                  Curious, punchy
+                </small>
+
+              </button>
+
+
+              <button
+                type="button"
+                [class.selected]="options.voiceStyle==='story_narrator'"
+                (click)="options.voiceStyle='story_narrator'"
+              >
+
+                <span>
+                  ST
+                </span>
+
+                <strong>
+                  Story Narrator
+                </strong>
+
+                <small>
+                  Human story
+                </small>
+
+              </button>
+
+
+              <button
+                type="button"
+                [class.selected]="options.voiceStyle==='fast_explainer'"
+                (click)="options.voiceStyle='fast_explainer'"
+              >
+
+                <span>
+                  FX
+                </span>
+
+                <strong>
+                  Fast Explainer
+                </strong>
+
+                <small>
+                  Sharp, clear
+                </small>
+
+              </button>
+
+
+              <button
+                type="button"
+                [class.selected]="options.voiceStyle==='dramatic_reveal'"
+                (click)="options.voiceStyle='dramatic_reveal'"
+              >
+
+                <span>
+                  DR
+                </span>
+
+                <strong>
+                  Dramatic Reveal
+                </strong>
+
+                <small>
+                  Suspense, payoff
+                </small>
+
+              </button>
+
+
+              <button
+                type="button"
+                [class.selected]="options.voiceStyle==='clean'"
+                (click)="options.voiceStyle='clean'"
+              >
+
+                <span>
+                  CN
+                </span>
+
+                <strong>
+                  Clean Natural
+                </strong>
+
+                <small>
+                  Less hype
+                </small>
+
+              </button>
+
+            </div>
+
+            <small class="control-help">
+
+              For people-focused clips,
+              choose Story Narrator.
+              For strange fruit,
+              process and fact videos,
+              choose Facts Explainer.
+
+            </small>
+
+          </div>
+
+
+          <!-- VOICES -->
+
+          <div class="field">
+
+            <div class="field-heading">
+
+              <label>
+
+                {{
+                  options.language === 'hi'
+                    ? 'Hindi Cartesia voices'
+                    : 'English Cartesia voices'
+                }}
+
+              </label>
+
+              <button
+                type="button"
+                class="text-button"
+                (click)="loadVoices()"
+                [disabled]="fetchingVoices"
+              >
+
+                {{
+                  fetchingVoices
+                    ? 'Loading…'
+                    : '↻ Refresh voices'
+                }}
+
+              </button>
+
+            </div>
+
+            <select
+              [(ngModel)]="options.voiceId"
+              [disabled]="fetchingVoices || !filteredVoices.length"
+            >
+
+              <option
+                *ngIf="!filteredVoices.length"
+                value=""
+              >
+                No matching voices found
+              </option>
+
+              <option
+                *ngFor="let voice of filteredVoices"
+                [ngValue]="voice.id"
+              >
+
+                {{voice.name}}
+                ·
+                {{voice.locale}}
+                {{
+                  voice.native
+                    ? '(native)'
+                    : '(multilingual)'
+                }}
+
+              </option>
+
+            </select>
+
+            <small class="control-help">
+
+              Only voices supporting
+              the selected language
+              appear. Native-accent
+              voices are listed first.
+              For Hindi, choose hi-IN
+              native when available.
+
+            </small>
+
+          </div>
+
+
+          <div class="rule"></div>
+
+
+          <!-- WATERMARK -->
+
+          <div class="field">
+
+            <label>
+
+              Channel watermark
+
+              <span class="hint">
+                Visible on exported video
+              </span>
+
+            </label>
+
+            <div class="watermark-control">
+
+              <input
+                [(ngModel)]="options.watermark"
+                type="text"
+                maxlength="35"
+                placeholder="YourChannelName"
+              >
+
+              <div
+                class="watermark-sample"
+                [style.opacity]="options.opacity/100"
+              >
+                {{
+                  options.watermark ||
+                  'Your channel'
+                }}
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <!-- WATERMARK OPACITY -->
+
+          <div class="field">
+
+            <div class="field-heading">
+
+              <label>
+                Watermark opacity
+              </label>
+
+              <strong class="setting-number">
+                {{options.opacity}}%
+              </strong>
+
+            </div>
+
+            <input
+              [(ngModel)]="options.opacity"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+            >
+
+            <div class="range-label">
+
+              <span>
+                Subtle
+              </span>
+
+              <span>
+                Bold
+              </span>
+
+            </div>
+
+          </div>
+
+
+          <div class="rule"></div>
+
+
+          <!-- CAPTIONS -->
+
+          <div class="switch-row">
+
+            <div>
+
+              <strong>
+                Animated captions
+              </strong>
+
+              <p>
+                Short, readable timed
+                subtitles
+              </p>
+
+            </div>
+
+            <label class="switch">
+
+              <input
+                type="checkbox"
+                [(ngModel)]="options.captions"
+              >
+
+              <span></span>
+
+            </label>
+
+          </div>
+
+
+          <!-- CTA -->
+
+          <div class="switch-row">
+
+            <div>
+
+              <strong>
+                Like, Subscribe & Bell
+                animation
+              </strong>
+
+              <p>
+                Animated visual
+                call-to-action
+              </p>
+
+            </div>
+
+            <label class="switch">
+
+              <input
+                type="checkbox"
+                [(ngModel)]="options.cta"
+              >
+
+              <span></span>
+
+            </label>
+
+          </div>
+
+
+          <!-- COVER OLD SUBTITLES -->
+
+          <div class="switch-row">
+
+            <div>
+
+              <strong>
+                Cover existing subtitles
+              </strong>
+
+              <p>
+                Enable only if the
+                original video already
+                has captions burned in.
+                Covers the lower text
+                band and may hide some
+                footage.
+              </p>
+
+            </div>
+
+            <label class="switch">
+
+              <input
+                type="checkbox"
+                [(ngModel)]="options.coverOriginalCaptions"
+              >
+
+              <span></span>
+
+            </label>
+
+          </div>
+
+
+          <!-- ADVANCED -->
+
+          <button
+            class="advanced-trigger"
+            type="button"
+            (click)="showAdvanced=!showAdvanced"
+          >
+
+            Advanced video controls
+
+            <span>
+              {{
+                showAdvanced
+                  ? '−'
+                  : '+'
+              }}
+            </span>
+
+          </button>
+
+
+          <div
+            *ngIf="showAdvanced"
+            class="advanced-content"
+          >
+
+            <div class="field">
+
+              <label>
+                Frame fit
+              </label>
+
+              <select
+                [(ngModel)]="options.fit"
+              >
+
+                <option value="fill">
+                  Fill vertical frame
+                  (center crop)
+                </option>
+
+                <option value="contain">
+                  Contain with padding
+                  (no crop)
+                </option>
+
+              </select>
+
+            </div>
+
+
+            <div class="switch-row">
+
+              <div>
+
+                <strong>
+                  Keep low original
+                  background audio
+                </strong>
+
+                <p>
+                  For ambient sounds
+                  you have rights to use
+                </p>
+
+              </div>
+
+              <label class="switch">
+
+                <input
+                  type="checkbox"
+                  [(ngModel)]="options.originalAudio"
+                >
+
+                <span></span>
+
+              </label>
+
+            </div>
+
+          </div>
+
+        </section>
+
+      </div>
+
+
+      <!-- ============================= -->
+      <!-- RIGHT -->
+      <!-- ============================= -->
+
+      <div class="right-stack">
+
+
+        <!-- =========================== -->
+        <!-- CREATE -->
+        <!-- =========================== -->
+
+        <section class="panel launch-panel">
+
+          <div class="section-title">
+
+            <div>
+
+              <span class="section-number">
+                03
+              </span>
+
+              <h2>
+                Create your Short
+              </h2>
+
+              <p>
+                Gemini + Cartesia + FFmpeg
+              </p>
+
+            </div>
+
+          </div>
+
+
+          <div class="pipeline">
+
+            <div>
+
+              <span class="pipeline-icon p1">
+                ◎
+              </span>
+
+              <span>
+
+                <strong>
+                  Understand every scene
+                </strong>
+
+                <small>
+                  Gemini watches the whole
+                  clip and remembers its
+                  key moments
+                </small>
+
+              </span>
+
+              <i>
+                01
+              </i>
+
+            </div>
+
+
+            <div class="pipeline-line"></div>
+
+
+            <div>
+
+              <span class="pipeline-icon p2">
+                ♫
+              </span>
+
+              <span>
+
+                <strong>
+                  Write & narrate
+                </strong>
+
+                <small>
+                  A fresh hook, context
+                  and grounded payoff
+                </small>
+
+              </span>
+
+              <i>
+                02
+              </i>
+
+            </div>
+
+
+            <div class="pipeline-line"></div>
+
+
+            <div>
+
+              <span class="pipeline-icon p3">
+                ▧
+              </span>
+
+              <span>
+
+                <strong>
+                  Render & package
+                </strong>
+
+                <small>
+                  Video + captions +
+                  posting kit
+                </small>
+
+              </span>
+
+              <i>
+                03
+              </i>
+
+            </div>
+
+          </div>
+
+
+          <button
+            class="generate-btn"
+            type="button"
+            (click)="create(false)"
+            [disabled]="!file || !ready || busy || processing"
+          >
+
+            <span>
+              ✦
+            </span>
+
+            {{
+              busy
+                ? 'Uploading video…'
+
+                : processing
+                  ? 'Working on your video…'
+
+                  : 'Generate Complete Short'
+            }}
+
+            <span class="arrow">
+              ↗
+            </span>
+
+          </button>
+
+
+          <button
+            class="review-btn"
+            type="button"
+            (click)="create(true)"
+            [disabled]="!file || !ready || busy || processing"
+          >
+
+            ✎ Analyze & review script first
+
+          </button>
+
+
+          <p class="launch-footnote">
+
+            Regenerate Script uses
+            Gemini text calls; a new
+            video render uses Cartesia
+            voice credits. Quotas and
+            charges depend on your
+            provider account.
+            No promise of unlimited
+            free generation.
+
+          </p>
+
+        </section>
+
+
+        <!-- =========================== -->
+        <!-- RESULT -->
+        <!-- =========================== -->
+
+        <section
+          *ngIf="job"
+          class="panel job-panel"
+          id="output"
+        >
+
+          <div class="job-head">
+
+            <span
+              class="job-dot"
+              [class.complete]="job.status==='done'"
+            ></span>
+
+            <div>
+
+              <h3>
+
+                {{
+                  job.status === 'done'
+
+                    ? 'Your Short is ready!'
+
+                    : job.status === 'regenerating'
+
+                      ? 'Writing a different script…'
+
+                      : job.status === 'review'
+
+                        ? 'Review your AI script'
+
+                        : job.status === 'error'
+
+                          ? 'Something needs attention'
+
+                          : 'Your video is cooking…'
+                }}
+
+              </h3>
+
+              <p>
+                {{job.step}}
+              </p>
+
+            </div>
+
+            <b>
+              {{
+                job.percent |
+                number:'1.0-0'
+              }}%
+            </b>
+
+          </div>
+
+
+          <div class="progress-track">
+
+            <div
+              class="progress-fill"
+              [style.width.%]="job.percent"
+            ></div>
+
+          </div>
+
+
+          <div
+            *ngIf="job.error"
+            class="error-details"
+          >
+
+            {{job.error}}
+
+          </div>
+
+
+          <!-- ========================= -->
+          <!-- FIXED VIDEO PREVIEW -->
+          <!-- ========================= -->
+
+          <div
+            *ngIf="job.status==='done'"
+            class="results-video"
+          >
+
+            <video
+              [src]="videoPreviewUrl"
+              controls
+              playsinline
+              preload="metadata"
+            ></video>
+
+
+            <!--
+              IMPORTANT:
+              Preview URL does NOT contain
+              ?download=1.
+
+              Backend therefore returns:
+
+              Content-Disposition: inline
+
+              and supports HTTP Range
+              requests for browser video
+              playback.
+            -->
+
+
+            <a
+              class="download-btn"
+              [href]="downloadUrl"
+              [attr.download]="downloadFilename"
+            >
+
+              ↓ Download MP4 video
+
+            </a>
+
+
+            <!--
+              Download URL contains:
+              ?download=1
+
+              Backend therefore returns:
+              Content-Disposition: attachment
+
+              Title can safely contain:
+              Hindi / emoji / special text.
+            -->
+
+
+            <div class="download-secondary">
+
+              <a
+                [href]="API_LINK(job.captionsUrl)"
+                download
+              >
+
+                ↓ Captions SRT
+
+              </a>
+
+
+              <a
+                [href]="API_LINK(job.metadataUrl)"
+                download
+              >
+
+                ↓ Publishing kit
+
+              </a>
+
+            </div>
+
+          </div>
+
+        </section>
+
+
+        <!-- =========================== -->
+        <!-- SCRIPT -->
+        <!-- =========================== -->
+
+        <section
+          *ngIf="job?.script"
+          class="panel script-panel"
+        >
+
+          <div class="section-title">
+
+            <div>
+
+              <span class="section-number">
+                ✦
+              </span>
+
+              <h2>
+                AI Creative Kit
+              </h2>
+
+              <p>
+                Review, regenerate or
+                edit original narration
+                and metadata
+              </p>
+
+            </div>
+
+          </div>
+
+
+          <!-- REGENERATE -->
+
+          <div class="story-actions">
+
+            <div class="story-revision">
+
+              Story version
+              {{
+                job?.scriptRevision ||
+                1
+              }}
+              · New script uses saved
+              visual analysis
+
+            </div>
+
+
+            <button
+              class="regenerate-btn"
+              type="button"
+              (click)="regenerateScript()"
+              [disabled]="!canRegenerate"
+            >
+
+              <span aria-hidden="true">
+                ↻
+              </span>
+
+              {{
+                job?.status === 'regenerating'
+                  ? 'Rewriting script…'
+                  : 'Regenerate Script — New Story'
+              }}
+
+            </button>
+
+
+            <p>
+
+              Creates another hook and
+              narration for this upload
+              without regenerating the
+              voice/video. Check the
+              facts and press Render
+              to apply.
+
+            </p>
+
+          </div>
+
+
+          <!-- SCRIPT SUMMARY -->
+
+          <div class="script-hook">
+
+            <small>
+              VIDEO UNDERSTANDING
+            </small>
+
+            <p>
+              {{job?.script?.summary}}
+            </p>
+
+            <small>
+              HOOK
+            </small>
+
+            <h3>
+              “{{job?.script?.hook}}”
+            </h3>
+
+          </div>
+
+
+          <!-- NARRATION -->
+
+          <div class="creative-label">
+
+            <strong>
+              Scene-by-scene narration
+            </strong>
+
+            <button
+              type="button"
+              (click)="copy(fullScript,'Script')"
+            >
+
+              Copy full script ↗
+
+            </button>
+
+          </div>
+
+
+          <div
+            class="beat"
+            *ngFor="
+              let b of job?.script?.beats;
+              let i=index
+            "
+          >
+
+            <div class="beat-time">
+
+              {{seconds(b.start)}}
+              –
+              {{seconds(b.end)}}
+
+            </div>
+
+            <textarea
+              [(ngModel)]="b.text"
+              rows="2"
+              maxlength="400"
+              [disabled]="processing"
+            ></textarea>
+
+          </div>
+
+
+          <!-- TITLE -->
+
+          <div class="creative-label">
+
+            <strong>
+              YouTube title
+            </strong>
+
+            <button
+              type="button"
+              (click)="copy(job?.script?.metadata?.title || '', 'Title')"
+            >
+
+              Copy ↗
+
+            </button>
+
+          </div>
+
+
+          <textarea
+            class="meta-input"
+            [(ngModel)]="job!.script!.metadata.title"
+            rows="2"
+            [disabled]="processing"
+          ></textarea>
+
+
+          <!-- DESCRIPTION -->
+
+          <div class="creative-label">
+
+            <strong>
+              Description
+            </strong>
+
+            <button
+              type="button"
+              (click)="copy(job?.script?.metadata?.description || '', 'Description')"
+            >
+
+              Copy ↗
+
+            </button>
+
+          </div>
+
+
+          <textarea
+            class="meta-input"
+            [(ngModel)]="job!.script!.metadata.description"
+            rows="4"
+            [disabled]="processing"
+          ></textarea>
+
+
+          <!-- TAGS -->
+
+          <div class="creative-label">
+
+            <strong>
+              Relevant tags
+            </strong>
+
+            <button
+              type="button"
+              (click)="copy(tags, 'Tags')"
+            >
+
+              Copy ↗
+
+            </button>
+
+          </div>
+
+
+          <textarea
+            class="meta-input"
+            [(ngModel)]="tags"
+            rows="2"
+            [disabled]="processing"
+          ></textarea>
+
+
+          <!-- RENDER -->
+
+          <button
+            *ngIf="
+              job?.status==='review' ||
+              job?.status==='done' ||
+              job?.status==='error'
+            "
+            class="render-btn"
+            type="button"
+            (click)="renderEdits()"
+            [disabled]="processing || busy"
+          >
+
+            ✦
+
+            {{
+              job?.status === 'review'
+                ? 'Render Edited Video'
+                : 'Re-render With My Edits'
+            }}
+
+          </button>
+
+
+          <small class="caution">
+
+            Check factual claims and
+            reuse rights before
+            publishing; changes after
+            video render require
+            re-rendering.
+
+          </small>
+
+        </section>
+
+
+        <!-- =========================== -->
+        <!-- TIPS -->
+        <!-- =========================== -->
+
+        <section class="panel facts-panel">
+
+          <div class="icon-light">
+            ✷
+          </div>
+
+          <h3>
+            Make it scroll-stopping
+          </h3>
+
+          <p>
+            Strong openings, honest
+            visual observations and a
+            short payoff help make a
+            clip engaging. The AI
+            suggests ideas, but views
+            and virality can never be
+            guaranteed.
+          </p>
+
+          <span>
+            CREATIVE TIP · KEEP IT ORIGINAL
+          </span>
+
+        </section>
+
+      </div>
+
+    </div>
+
+
+    <!-- =============================== -->
+    <!-- FOOTER -->
+    <!-- =============================== -->
+
+    <footer class="app-footer">
+
+      CLIPCRAFT STUDIO ·
+      LOCAL-FIRST VIDEO EDITOR
+
+      <span>
+        Made for storytellers,
+        not recycled uploads ·
+        Only process footage you
+        have rights to use.
+      </span>
+
+    </footer>
+
+
+    <!-- =============================== -->
+    <!-- TOAST -->
+    <!-- =============================== -->
+
+    <div
+      class="toast"
+      *ngIf="toast"
+      role="status"
+    >
+
+      ✓ {{toast}}
+
+      <button
+        type="button"
+        (click)="toast=''"
+      >
+        ×
+      </button>
+
+    </div>
+
   </main>
+
 </div>

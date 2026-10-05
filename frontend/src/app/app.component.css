@@ -8,7 +8,7 @@
 .regenerate-btn:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.08);}
 .regenerate-btn:disabled{cursor:not-allowed;opacity:.55;}
 
-.voice-grid{grid-template-columns:repeat(4,1fr)}
+.voice-grid{grid-template-columns:repeat(3,1fr)}
 .voice-grid button{min-height:94px}
 .voice-grid button>span{font-size:12px;font-weight:900;letter-spacing:.08em;color:#d8ccff}
 .key-box{padding:14px;border:1px solid #38324f;border-radius:12px;background:#111729}
