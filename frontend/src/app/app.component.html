@@ -755,16 +755,16 @@
           </div>
 
 
-          <!-- VOICE STYLE -->
+          <!-- CONTENT CATEGORY -->
 
           <div class="field">
 
             <label>
 
-              Voiceover style
+              Content category
 
               <span class="hint">
-                Script rhythm + TTS energy
+                Changes script structure + voice casting
               </span>
 
             </label>
@@ -774,41 +774,20 @@
 
               <button
                 type="button"
-                [class.selected]="options.voiceStyle==='viral_funny'"
-                (click)="options.voiceStyle='viral_funny'"
-              >
-
-                <span>
-                  VF
-                </span>
-
-                <strong>
-                  Viral Funny
-                </strong>
-
-                <small>
-                  Fast, playful
-                </small>
-
-              </button>
-
-
-              <button
-                type="button"
                 [class.selected]="options.voiceStyle==='facts_explainer'"
                 (click)="options.voiceStyle='facts_explainer'"
               >
 
                 <span>
-                  FE
+                  FACT
                 </span>
 
                 <strong>
-                  Facts Explainer
+                  Facts
                 </strong>
 
                 <small>
-                  Curious, punchy
+                  Fast curiosity explainer
                 </small>
 
               </button>
@@ -816,83 +795,20 @@
 
               <button
                 type="button"
-                [class.selected]="options.voiceStyle==='story_narrator'"
-                (click)="options.voiceStyle='story_narrator'"
+                [class.selected]="options.voiceStyle==='viral_funny'"
+                (click)="options.voiceStyle='viral_funny'"
               >
 
                 <span>
-                  ST
+                  COM
                 </span>
 
                 <strong>
-                  Story Narrator
+                  Comedy
                 </strong>
 
                 <small>
-                  Human story
-                </small>
-
-              </button>
-
-
-              <button
-                type="button"
-                [class.selected]="options.voiceStyle==='fast_explainer'"
-                (click)="options.voiceStyle='fast_explainer'"
-              >
-
-                <span>
-                  FX
-                </span>
-
-                <strong>
-                  Fast Explainer
-                </strong>
-
-                <small>
-                  Sharp, clear
-                </small>
-
-              </button>
-
-
-              <button
-                type="button"
-                [class.selected]="options.voiceStyle==='dramatic_reveal'"
-                (click)="options.voiceStyle='dramatic_reveal'"
-              >
-
-                <span>
-                  DR
-                </span>
-
-                <strong>
-                  Dramatic Reveal
-                </strong>
-
-                <small>
-                  Suspense, payoff
-                </small>
-
-              </button>
-
-
-              <button
-                type="button"
-                [class.selected]="options.voiceStyle==='clean'"
-                (click)="options.voiceStyle='clean'"
-              >
-
-                <span>
-                  CN
-                </span>
-
-                <strong>
-                  Clean Natural
-                </strong>
-
-                <small>
-                  Less hype
+                  Multi-character funny dub
                 </small>
 
               </button>
@@ -901,11 +817,19 @@
 
             <small class="control-help">
 
-              For people-focused clips,
-              choose Story Narrator.
-              For strange fruit,
-              process and fact videos,
-              choose Facts Explainer.
+              <ng-container *ngIf="options.voiceStyle==='viral_funny'; else factsHelp">
+                Comedy automatically tracks recurring characters,
+                gives male/female characters different compatible
+                Cartesia voices, keeps each line on its visual beat,
+                and writes a fast hook + story payoff.
+                The voice selected below is used as the narrator/fallback voice.
+              </ng-container>
+
+              <ng-template #factsHelp>
+                Facts keeps one clear explainer voice, opens with an
+                immediate curiosity hook, and writes search-friendly
+                title + description metadata for the actual clip.
+              </ng-template>
 
             </small>
 
