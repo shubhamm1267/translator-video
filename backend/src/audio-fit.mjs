@@ -1,4 +1,3 @@
-
 /**
  * ClipCraft Pro — Smart Audio/Video Timing
  *
@@ -26,6 +25,9 @@ const STYLES = Object.freeze({
   },
 
   viral_funny: {
+    // Multi-character Comedy normally bypasses global fitting because its
+    // dialogue renderer is timeline-synced. Keep the legacy fallback here
+    // for single-voice/fallback cases and backward-compatible tests.
     minimumVideoRate: 1.04,
     maximumVideoRate: 2.25,
     minimumAudioTempo: 0.68,
@@ -47,10 +49,13 @@ const STYLES = Object.freeze({
   },
 
   fast_explainer: {
-    minimumVideoRate: 1.16,
-    maximumVideoRate: 2.40,
-    minimumAudioTempo: 0.66,
-    maximumAudioTempo: 1.36
+    // Movie Shorts v5.1: preserve the selected story clip.
+    // A 35s winner must never become a 15s export simply
+    // because narration is short.
+    minimumVideoRate: 1.00,
+    maximumVideoRate: 1.02,
+    minimumAudioTempo: 0.92,
+    maximumAudioTempo: 1.14
   }
 });
 
@@ -72,7 +77,6 @@ export function audioFitPlan(
   const config =
     STYLES[style] || STYLES.viral_funny;
 
-  // Leave only a tiny ending breath.
   const endBreath = Math.min(
     0.12,
     videoSeconds * 0.012
@@ -80,7 +84,10 @@ export function audioFitPlan(
 
   const idealRate =
     videoSeconds /
-    Math.max(0.1, voiceSeconds + endBreath);
+    Math.max(
+      0.1,
+      voiceSeconds + endBreath
+    );
 
   const videoRate = clamp(
     Math.max(
@@ -91,18 +98,18 @@ export function audioFitPlan(
     config.maximumVideoRate
   );
 
-  // Complete footage plays in this duration.
   const outputSeconds =
     videoSeconds / videoRate;
 
-  const desiredSpeechSeconds = Math.max(
-    0.3,
-    outputSeconds - endBreath
-  );
+  const desiredSpeechSeconds =
+    Math.max(
+      0.3,
+      outputSeconds - endBreath
+    );
 
-  // Pitch-preserving FFmpeg tempo correction.
   const requiredTempo =
-    voiceSeconds / desiredSpeechSeconds;
+    voiceSeconds /
+    desiredSpeechSeconds;
 
   const tempo = clamp(
     requiredTempo,
@@ -113,18 +120,18 @@ export function audioFitPlan(
   const speechEnd =
     voiceSeconds / tempo;
 
-  const remainingSeconds = Math.max(
-    0,
-    outputSeconds - speechEnd
-  );
+  const remainingSeconds =
+    Math.max(
+      0,
+      outputSeconds - speechEnd
+    );
 
-  const excessSeconds = Math.max(
-    0,
-    speechEnd - outputSeconds
-  );
+  const excessSeconds =
+    Math.max(
+      0,
+      speechEnd - outputSeconds
+    );
 
-  // Extreme mismatch: request AI rewrite instead
-  // of exporting an abruptly cut or silent video.
   const canRender =
     requiredTempo >=
       config.minimumAudioTempo - 0.005 &&
@@ -137,34 +144,44 @@ export function audioFitPlan(
     !canRender ||
     videoRate >= (
       style === 'fast_explainer'
-        ? 1.46
+        ? 1.015
         : style === 'facts_explainer'
           ? 1.36
           : style === 'story_narrator'
             ? 1.30
             : 1.23
     ) ||
-    requiredTempo >= 1.24;
+    requiredTempo >= (
+      style === 'fast_explainer'
+        ? 1.12
+        : 1.24
+    );
 
   return {
     ratio: Number(
-      (voiceSeconds / videoSeconds).toFixed(4)
+      (
+        voiceSeconds /
+        videoSeconds
+      ).toFixed(4)
     ),
 
     needsRewrite,
     canRender,
 
-    targetSeconds: outputSeconds,
+    targetSeconds:
+      outputSeconds,
+
     outputSeconds,
 
     videoRate,
     tempo,
     requiredTempo,
 
-    speechEnd: Math.min(
-      outputSeconds,
-      speechEnd
-    ),
+    speechEnd:
+      Math.min(
+        outputSeconds,
+        speechEnd
+      ),
 
     remainingSeconds,
     excessSeconds,

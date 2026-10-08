@@ -39,11 +39,13 @@ import {
 
 import {
   analyzeVideo,
+  analyzeVideoEvidence,
   generateScriptFromContext,
   cartesiaVoices,
   speakCartesia,
   validateScript,
   retimeScriptForVoice,
+  interactionText,
   GEMINI_MODELS
 } from './ai.mjs';
 
@@ -423,6 +425,12 @@ function externalJob(j) {
     info:
       j.info || null,
 
+    sourceInfo:
+      j.sourceInfo || null,
+
+    selectedClip:
+      j.selectedClip || null,
+
     script:
       j.script || null,
 
@@ -461,6 +469,1792 @@ function progress(
   if (status) {
     j.status = status;
   }
+}
+
+function progressRange(
+  j,
+  from,
+  to
+) {
+  return (
+    step,
+    percent
+  ) => {
+    const p =
+      Math.max(
+        0,
+        Math.min(
+          50,
+          Number(percent) || 0
+        )
+      ) / 50;
+
+    progress(
+      j,
+      step,
+      Math.max(
+        j.percent || 0,
+        Math.round(
+          from +
+          (to - from) * p
+        )
+      ),
+      'analyzing'
+    );
+  };
+}
+
+// ==========================================
+// MOVIE SHORTS AUTO-TRIM v5.0
+// BEST-CLIP + ENDING-PAYOFF GATE
+// ==========================================
+
+const MOVIE_ACTION_RE =
+  /(attack|attacks|chase|chases|fight|fights|escape|escapes|run|runs|jump|jumps|fall|falls|crash|crashes|break|breaks|explode|explodes|transform|transforms|open|opens|discover|discovers|find|finds|appear|appears|disappear|disappears|rescue|rescues|save|saves|grab|grabs|bite|bites|hit|hits|shoot|shoots|enter|enters|leave|leaves|reveal|reveals|turn|turns|react|reacts|shock|shocked|danger|monster|shark|giant|trap|trapped|door|secret|power|magic|sudden|suddenly|पीछा|हमला|भाग|गिर|टकर|टूट|फट|बदल|खुल|मिल|दिख|बचा|पकड़|काट|मार|घुस|निकल|खुलासा|चौंक|खतरा|शार्क|राक्षस|जाल|अचानक)/iu;
+
+const MOVIE_PAYOFF_RE =
+  /(payoff|result|reveal|reveals|revealed|finally|escape|escapes|escaped|survive|survives|saved|rescue|rescued|defeat|defeats|destroy|destroyed|caught|catches|bite|bites|attack|attacks|crash|crashes|break|breaks|open|opens|discover|discovers|find|finds|appear|appears|reaction|reacts|shocked|turns out|transforms|returns|arrives|ends|final|last|खुलासा|आखिर|अंत|बच|भाग|मिल|पकड़|हमला|काट|टकर|टूट|खुल|चौंक|नतीजा|पता चलता|सामने आ|बदल)/iu;
+
+const MOVIE_WEAK_RE =
+  /(empty|nothing happens|open water|only water|just water|dark|darkness|black screen|blank|static shot|still shot|credits|logo|title card|long conversation|talking only|walking only|calm water|blue water|no visible change|खाली|सिर्फ पानी|केवल पानी|अंधेरा|ब्लैक स्क्रीन|क्रेडिट|लोग बस बात|सिर्फ चल|कोई बदलाव नहीं)/iu;
+
+function clamp(
+  value,
+  min,
+  max
+) {
+  return Math.max(
+    min,
+    Math.min(
+      max,
+      value
+    )
+  );
+}
+
+function movieMoments(
+  context,
+  duration
+) {
+  const d =
+    Math.max(
+      1,
+      Number(duration) || 1
+    );
+
+  return (
+    Array.isArray(
+      context?.inventory?.moments
+    )
+      ? context.inventory.moments
+      : []
+  )
+    .map(item => ({
+      time:
+        Number(item?.time),
+
+      visible:
+        String(
+          item?.visible || ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim(),
+
+      certainty:
+        String(
+          item?.certainty || ''
+        )
+          .trim()
+          .toLowerCase()
+    }))
+    .filter(item =>
+      Number.isFinite(item.time) &&
+      item.time >= 0 &&
+      item.time <= d &&
+      item.visible
+    )
+    .sort(
+      (a, b) =>
+        a.time - b.time
+    );
+}
+
+function movieCuts(
+  context,
+  duration
+) {
+  const d =
+    Math.max(
+      1,
+      Number(duration) || 1
+    );
+
+  return (
+    Array.isArray(
+      context?.inventory?.sceneCuts
+    )
+      ? context.inventory.sceneCuts
+      : []
+  )
+    .map(Number)
+    .filter(value =>
+      Number.isFinite(value) &&
+      value > 0.15 &&
+      value < d - 0.15
+    )
+    .sort(
+      (a, b) =>
+        a - b
+    );
+}
+
+function snapMovieBoundary(
+  value,
+  cuts,
+  direction = 'nearest',
+  radius = 1.5
+) {
+  const candidates =
+    cuts
+      .filter(cut =>
+        Math.abs(
+          cut - value
+        ) <= radius
+      )
+      .filter(cut =>
+        direction === 'before'
+          ? cut <= value + 0.18
+          : direction === 'after'
+            ? cut >= value - 0.18
+            : true
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(
+            a - value
+          ) -
+          Math.abs(
+            b - value
+          )
+      );
+
+  return Number.isFinite(
+    candidates[0]
+  )
+    ? candidates[0]
+    : value;
+}
+
+function normalizeMovieWindow(
+  start,
+  end,
+  duration,
+  cuts = []
+) {
+  const d =
+    Math.max(
+      1,
+      Number(duration) || 1
+    );
+
+  const minLength =
+    Math.min(
+      28,
+      d
+    );
+
+  const maxLength =
+    Math.min(
+      58,
+      d
+    );
+
+  const idealLength =
+    Math.min(
+      44,
+      d
+    );
+
+  let s =
+    Number(start);
+
+  let e =
+    Number(end);
+
+  if (
+    !Number.isFinite(s) ||
+    !Number.isFinite(e) ||
+    e <= s
+  ) {
+    s =
+      Math.max(
+        0,
+        d * 0.35
+      );
+
+    e =
+      Math.min(
+        d,
+        s + idealLength
+      );
+  }
+
+  s =
+    clamp(
+      s,
+      0,
+      Math.max(
+        0,
+        d - minLength
+      )
+    );
+
+  e =
+    clamp(
+      e,
+      s + 0.5,
+      d
+    );
+
+  if (
+    e - s >
+    maxLength
+  ) {
+    e =
+      s +
+      maxLength;
+  }
+
+  if (
+    e - s <
+    minLength
+  ) {
+    const center =
+      (
+        s +
+        e
+      ) / 2;
+
+    s =
+      clamp(
+        center -
+        idealLength / 2,
+        0,
+        Math.max(
+          0,
+          d - idealLength
+        )
+      );
+
+    e =
+      Math.min(
+        d,
+        s +
+        idealLength
+      );
+  }
+
+  const snappedStart =
+    snapMovieBoundary(
+      s,
+      cuts,
+      'before',
+      1.6
+    );
+
+  const snappedEnd =
+    snapMovieBoundary(
+      e,
+      cuts,
+      'after',
+      1.6
+    );
+
+  if (
+    snappedEnd -
+      snappedStart >=
+      minLength &&
+    snappedEnd -
+      snappedStart <=
+      maxLength
+  ) {
+    s =
+      snappedStart;
+
+    e =
+      snappedEnd;
+  }
+
+  if (
+    e >
+    d
+  ) {
+    e =
+      d;
+
+    s =
+      Math.max(
+        0,
+        e -
+        idealLength
+      );
+  }
+
+  if (
+    e - s <
+    minLength &&
+    d >= minLength
+  ) {
+    e =
+      Math.min(
+        d,
+        s +
+        minLength
+      );
+
+    s =
+      Math.max(
+        0,
+        e -
+        minLength
+      );
+  }
+
+  return {
+    start:
+      +s.toFixed(3),
+
+    end:
+      +e.toFixed(3),
+
+    duration:
+      +(e - s)
+        .toFixed(3)
+  };
+}
+
+function candidateLocalScore(
+  candidate,
+  moments
+) {
+  const start =
+    candidate.start;
+
+  const end =
+    candidate.end;
+
+  const length =
+    Math.max(
+      1,
+      end -
+      start
+    );
+
+  const inside =
+    moments.filter(item =>
+      item.time >= start &&
+      item.time <= end
+    );
+
+  const firstEnd =
+    start +
+    Math.min(
+      8,
+      length * 0.24
+    );
+
+  const middleStart =
+    start +
+    length * 0.20;
+
+  const middleEnd =
+    start +
+    length * 0.76;
+
+  const endingStart =
+    end -
+    Math.min(
+      11,
+      length * 0.28
+    );
+
+  const first =
+    inside.filter(item =>
+      item.time <= firstEnd
+    );
+
+  const middle =
+    inside.filter(item =>
+      item.time >= middleStart &&
+      item.time <= middleEnd
+    );
+
+  const ending =
+    inside.filter(item =>
+      item.time >= endingStart
+    );
+
+  const actionHits =
+    inside.filter(item =>
+      MOVIE_ACTION_RE.test(
+        item.visible
+      )
+    ).length;
+
+  const openingActionHits =
+    first.filter(item =>
+      MOVIE_ACTION_RE.test(
+        item.visible
+      )
+    ).length;
+
+  const endingActionHits =
+    ending.filter(item =>
+      MOVIE_ACTION_RE.test(
+        item.visible
+      )
+    ).length;
+
+  const endingPayoffHits =
+    ending.filter(item =>
+      MOVIE_PAYOFF_RE.test(
+        item.visible
+      )
+    ).length;
+
+  const weakHits =
+    inside.filter(item =>
+      MOVIE_WEAK_RE.test(
+        item.visible
+      )
+    ).length;
+
+  const weakEndingHits =
+    ending.filter(item =>
+      MOVIE_WEAK_RE.test(
+        item.visible
+      )
+    ).length;
+
+  const lastMoment =
+    inside.at(-1);
+
+  const lastMomentGap =
+    lastMoment
+      ? Math.max(
+          0,
+          end -
+          lastMoment.time
+        )
+      : length;
+
+  const coverage =
+    (
+      first.length > 0
+        ? 1
+        : 0
+    ) +
+    (
+      middle.length > 0
+        ? 1
+        : 0
+    ) +
+    (
+      ending.length > 0
+        ? 1
+        : 0
+    );
+
+  const openingScore =
+    clamp(
+      first.length * 1.1 +
+      openingActionHits * 2.5,
+      0,
+      10
+    );
+
+  const storyScore =
+    clamp(
+      coverage * 1.7 +
+      middle.length * 0.65 +
+      actionHits * 0.8,
+      0,
+      10
+    );
+
+  let endingScore =
+    ending.length * 1.1 +
+    endingActionHits * 1.8 +
+    endingPayoffHits * 3.2;
+
+  if (
+    lastMomentGap <= 3.5
+  ) {
+    endingScore += 2.0;
+  } else if (
+    lastMomentGap <= 6.5
+  ) {
+    endingScore += 0.8;
+  } else {
+    endingScore -= 2.5;
+  }
+
+  endingScore -=
+    weakEndingHits * 2.7;
+
+  endingScore =
+    clamp(
+      endingScore,
+      0,
+      10
+    );
+
+  const densityScore =
+    clamp(
+      inside.length * 0.75 +
+      actionHits * 0.7,
+      0,
+      10
+    );
+
+  const weakPenalty =
+    weakHits * 2.1 +
+    weakEndingHits * 2.6;
+
+  const total =
+    clamp(
+      openingScore * 1.6 +
+      storyScore * 2.0 +
+      endingScore * 3.1 +
+      densityScore * 1.1 -
+      weakPenalty,
+      0,
+      100
+    );
+
+  return {
+    heuristicScore:
+      +total.toFixed(2),
+
+    openingScore:
+      +openingScore.toFixed(2),
+
+    storyScore:
+      +storyScore.toFixed(2),
+
+    endingScore:
+      +endingScore.toFixed(2),
+
+    densityScore:
+      +densityScore.toFixed(2),
+
+    momentCount:
+      inside.length,
+
+    lastMomentGap:
+      +lastMomentGap.toFixed(2),
+
+    endingEvidence:
+      ending
+        .slice(-3)
+        .map(item =>
+          `${item.time.toFixed(1)}s ${item.visible}`
+        )
+        .join(' | ')
+        .slice(
+          0,
+          480
+        )
+  };
+}
+
+function buildMovieCandidates(
+  context,
+  duration
+) {
+  const d =
+    Math.max(
+      1,
+      Number(duration) || 1
+    );
+
+  const moments =
+    movieMoments(
+      context,
+      d
+    );
+
+  const cuts =
+    movieCuts(
+      context,
+      d
+    );
+
+  if (
+    d <= 62
+  ) {
+    return [
+      {
+        ...normalizeMovieWindow(
+          0,
+          d,
+          d,
+          cuts
+        ),
+
+        ...candidateLocalScore(
+          {
+            start:
+              0,
+
+            end:
+              d
+          },
+          moments
+        ),
+
+        source:
+          'already-short'
+      }
+    ];
+  }
+
+  const raw = [];
+
+  const add = (
+    start,
+    end,
+    source
+  ) => {
+    const normalized =
+      normalizeMovieWindow(
+        start,
+        end,
+        d,
+        cuts
+      );
+
+    raw.push({
+      ...normalized,
+      source
+    });
+  };
+
+  const lengths =
+    [
+      32,
+      38,
+      44,
+      50,
+      56
+    ];
+
+  for (
+    const moment
+    of moments
+  ) {
+    for (
+      const len
+      of lengths
+    ) {
+      add(
+        moment.time -
+        3.2,
+        moment.time -
+        3.2 +
+        len,
+        'opening-anchor'
+      );
+
+      add(
+        moment.time +
+        4.0 -
+        len,
+        moment.time +
+        4.0,
+        'ending-anchor'
+      );
+
+      add(
+        moment.time -
+        len * 0.42,
+        moment.time +
+        len * 0.58,
+        'center-anchor'
+      );
+    }
+  }
+
+  const allCuts =
+    [
+      0,
+      ...cuts,
+      d
+    ];
+
+  for (
+    let i = 0;
+    i < allCuts.length;
+    i++
+  ) {
+    const startCut =
+      allCuts[i];
+
+    for (
+      const target
+      of [
+        36,
+        44,
+        52
+      ]
+    ) {
+      const desiredEnd =
+        startCut +
+        target;
+
+      const endCut =
+        allCuts
+          .filter(cut =>
+            cut >
+            startCut +
+            27
+          )
+          .sort(
+            (a, b) =>
+              Math.abs(
+                a -
+                desiredEnd
+              ) -
+              Math.abs(
+                b -
+                desiredEnd
+              )
+          )[0];
+
+      if (
+        Number.isFinite(
+          endCut
+        ) &&
+        endCut -
+          startCut <=
+          59
+      ) {
+        add(
+          startCut,
+          endCut,
+          'cut-to-cut'
+        );
+      }
+    }
+  }
+
+  const payoffMoments =
+    moments.filter(item =>
+      MOVIE_PAYOFF_RE.test(
+        item.visible
+      )
+    );
+
+  for (
+    const payoff
+    of payoffMoments
+  ) {
+    const previous =
+      moments
+        .filter(item =>
+          item.time <
+            payoff.time -
+            18 &&
+          item.time >
+            payoff.time -
+            55
+        )
+        .filter(item =>
+          MOVIE_ACTION_RE.test(
+            item.visible
+          )
+        )
+        .at(-1);
+
+    if (previous) {
+      add(
+        previous.time -
+        2.5,
+        payoff.time +
+        4.5,
+        'setup-to-payoff'
+      );
+    }
+  }
+
+  const deduped =
+    new Map();
+
+  for (
+    const candidate
+    of raw
+  ) {
+    const key =
+      `${Math.round(candidate.start * 2) / 2}-` +
+      `${Math.round(candidate.end * 2) / 2}`;
+
+    const scored = {
+      ...candidate,
+      ...candidateLocalScore(
+        candidate,
+        moments
+      )
+    };
+
+    const current =
+      deduped.get(key);
+
+    if (
+      !current ||
+      scored.heuristicScore >
+      current.heuristicScore
+    ) {
+      deduped.set(
+        key,
+        scored
+      );
+    }
+  }
+
+  const sorted =
+    [
+      ...deduped.values()
+    ]
+      .filter(candidate =>
+        candidate.duration >= 27.5 &&
+        candidate.duration <= 58.5
+      )
+      .sort(
+        (a, b) =>
+          b.endingScore -
+          a.endingScore ||
+          b.heuristicScore -
+          a.heuristicScore ||
+          b.storyScore -
+          a.storyScore
+      );
+
+  return sorted.slice(
+    0,
+    12
+  );
+}
+
+function movieCandidateFallback(
+  context,
+  duration
+) {
+  const candidates =
+    buildMovieCandidates(
+      context,
+      duration
+    );
+
+  if (
+    candidates.length
+  ) {
+    return candidates;
+  }
+
+  const d =
+    Math.max(
+      1,
+      Number(duration) || 1
+    );
+
+  const start =
+    Math.max(
+      0,
+      Math.min(
+        d - 44,
+        d * 0.35
+      )
+    );
+
+  return [
+    {
+      ...normalizeMovieWindow(
+        start,
+        Math.min(
+          d,
+          start + 44
+        ),
+        d,
+        []
+      ),
+
+      heuristicScore:
+        0,
+
+      openingScore:
+        0,
+
+      storyScore:
+        0,
+
+      endingScore:
+        0,
+
+      densityScore:
+        0,
+
+      momentCount:
+        0,
+
+      lastMomentGap:
+        44,
+
+      endingEvidence:
+        '',
+
+      source:
+        'time-fallback'
+    }
+  ];
+}
+
+async function chooseMovieShortCandidates(
+  context,
+  duration,
+  options,
+  providerKeys = {}
+) {
+  const d =
+    Number(duration);
+
+  const candidates =
+    movieCandidateFallback(
+      context,
+      d
+    );
+
+  if (
+    !Number.isFinite(d) ||
+    d <= 62 ||
+    candidates.length <= 1
+  ) {
+    return candidates;
+  }
+
+  const key =
+    providerKeys?.geminiKey ||
+    CFG.geminiKey;
+
+  if (!key) {
+    return candidates;
+  }
+
+  const model =
+    GEMINI_MODELS.includes(
+      options.geminiModel
+    )
+      ? options.geminiModel
+      : CFG.geminiModel;
+
+  const compactCandidates =
+    candidates.map(
+      (
+        candidate,
+        index
+      ) => ({
+        index,
+        start:
+          candidate.start,
+
+        end:
+          candidate.end,
+
+        duration:
+          candidate.duration,
+
+        localOpening:
+          candidate.openingScore,
+
+        localStory:
+          candidate.storyScore,
+
+        localEnding:
+          candidate.endingScore,
+
+        localHeuristic:
+          candidate.heuristicScore,
+
+        endingEvidence:
+          candidate.endingEvidence
+      })
+    );
+
+  const prompt = `
+You are the FINAL EDITOR choosing the best source clip for a high-retention vertical Movie Short.
+
+SOURCE DURATION:
+${d.toFixed(2)} seconds
+
+FULL VISUAL INVENTORY:
+${JSON.stringify(
+  context?.inventory || {}
+).slice(0, 22000)}
+
+CANDIDATE WINDOWS:
+${JSON.stringify(compactCandidates)}
+
+Rank the candidates by whether they form a COMPLETE mini-story.
+
+MOST IMPORTANT:
+A clip with a weak or empty ending is BAD even if the middle is exciting.
+
+SCORING:
+1. OPENING (0-10)
+- First 1-4 seconds already contain visible action/question/danger.
+- Avoid slow setup before anything happens.
+
+2. MIDDLE (0-10)
+- There is a visible change, escalation, chase, discovery, attack,
+  transformation, decision, consequence or meaningful reaction.
+- Avoid long empty/static/talking-only stretches.
+
+3. ENDING (0-10) — HIGHEST PRIORITY
+- Last 3-8 seconds contain a VISIBLE payoff/result/reveal/reaction.
+- The selected window must not stop before the event resolves.
+- Reject endings that are only empty water, darkness, walking,
+  static scenery, credits, or an unresolved setup.
+
+4. STORY (0-10)
+- The clip makes sense as:
+  HOOK -> SETUP -> ESCALATION -> PAYOFF.
+- It should be understandable without scenes outside this window.
+
+5. RETENTION
+- Prefer a candidate where a narrator can create an honest open loop
+  at the start and satisfy it at the end.
+- Do not choose a famous-looking moment just because it contains a shark,
+  monster, explosion, etc. The sequence itself must have a satisfying ending.
+
+Use only supplied visual evidence. Do not invent plot facts.
+
+Return the BEST candidates in ranked order.
+At least 3 rankings when possible.
+
+JSON ONLY:
+{
+  "rankings": [
+    {
+      "index": 0,
+      "overallScore": 9.1,
+      "openingScore": 8.5,
+      "middleScore": 9.0,
+      "endingScore": 9.5,
+      "storyScore": 9.2,
+      "reason": "why this complete mini-story works",
+      "hookIdea": "truthful unresolved hook angle",
+      "endingEvidence": "exact visible payoff/reaction near the end"
+    }
+  ]
+}
+`;
+
+  try {
+    const response =
+      await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/interactions',
+        {
+          method:
+            'POST',
+
+          signal:
+            AbortSignal.timeout(
+              180000
+            ),
+
+          headers: {
+            'x-goog-api-key':
+              key,
+
+            'Content-Type':
+              'application/json'
+          },
+
+          body:
+            JSON.stringify({
+              model,
+
+              store:
+                false,
+
+              input: [
+                {
+                  type:
+                    'text',
+
+                  text:
+                    prompt
+                }
+              ],
+
+              response_format: {
+                type:
+                  'text',
+
+                mime_type:
+                  'application/json',
+
+                schema: {
+                  type:
+                    'object',
+
+                  properties: {
+                    rankings: {
+                      type:
+                        'array',
+
+                      items: {
+                        type:
+                          'object',
+
+                        properties: {
+                          index: {
+                            type:
+                              'number'
+                          },
+
+                          overallScore: {
+                            type:
+                              'number'
+                          },
+
+                          openingScore: {
+                            type:
+                              'number'
+                          },
+
+                          middleScore: {
+                            type:
+                              'number'
+                          },
+
+                          endingScore: {
+                            type:
+                              'number'
+                          },
+
+                          storyScore: {
+                            type:
+                              'number'
+                          },
+
+                          reason: {
+                            type:
+                              'string'
+                          },
+
+                          hookIdea: {
+                            type:
+                              'string'
+                          },
+
+                          endingEvidence: {
+                            type:
+                              'string'
+                          }
+                        },
+
+                        required: [
+                          'index',
+                          'overallScore',
+                          'openingScore',
+                          'middleScore',
+                          'endingScore',
+                          'storyScore',
+                          'reason',
+                          'hookIdea',
+                          'endingEvidence'
+                        ]
+                      }
+                    }
+                  },
+
+                  required: [
+                    'rankings'
+                  ]
+                }
+              },
+
+              generation_config: {
+                temperature:
+                  0.08
+              }
+            })
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        `Movie candidate ranking: ${response.status}`
+      );
+    }
+
+    const text =
+      interactionText(
+        await response.json()
+      );
+
+    const parsed =
+      JSON.parse(
+        text.replace(
+          /^```json\s*|\s*```$/gi,
+          ''
+        )
+      );
+
+    const rankings =
+      Array.isArray(
+        parsed?.rankings
+      )
+        ? parsed.rankings
+        : [];
+
+    const byIndex =
+      new Map();
+
+    for (
+      const rank
+      of rankings
+    ) {
+      const index =
+        Math.round(
+          Number(rank?.index)
+        );
+
+      if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >=
+          candidates.length
+      ) {
+        continue;
+      }
+
+      const base =
+        candidates[index];
+
+      const aiOverall =
+        clamp(
+          Number(rank.overallScore) || 0,
+          0,
+          10
+        );
+
+      const aiOpening =
+        clamp(
+          Number(rank.openingScore) || 0,
+          0,
+          10
+        );
+
+      const aiMiddle =
+        clamp(
+          Number(rank.middleScore) || 0,
+          0,
+          10
+        );
+
+      const aiEnding =
+        clamp(
+          Number(rank.endingScore) || 0,
+          0,
+          10
+        );
+
+      const aiStory =
+        clamp(
+          Number(rank.storyScore) || 0,
+          0,
+          10
+        );
+
+      let finalScore =
+        base.heuristicScore * 0.28 +
+        aiOverall * 2.0 +
+        aiOpening * 1.2 +
+        aiMiddle * 1.5 +
+        aiStory * 1.8 +
+        aiEnding * 3.8;
+
+      if (
+        aiEnding < 6
+      ) {
+        finalScore -= 22;
+      }
+
+      if (
+        base.endingScore < 4.5
+      ) {
+        finalScore -= 12;
+      }
+
+      byIndex.set(
+        index,
+        {
+          ...base,
+
+          aiOverall:
+            +aiOverall.toFixed(2),
+
+          aiOpening:
+            +aiOpening.toFixed(2),
+
+          aiMiddle:
+            +aiMiddle.toFixed(2),
+
+          aiEnding:
+            +aiEnding.toFixed(2),
+
+          aiStory:
+            +aiStory.toFixed(2),
+
+          finalScore:
+            +finalScore.toFixed(2),
+
+          reason:
+            String(
+              rank.reason || ''
+            ).slice(
+              0,
+              420
+            ),
+
+          hookIdea:
+            String(
+              rank.hookIdea || ''
+            ).slice(
+              0,
+              180
+            ),
+
+          aiEndingEvidence:
+            String(
+              rank.endingEvidence || ''
+            ).slice(
+              0,
+              320
+            )
+        }
+      );
+    }
+
+    const ranked =
+      candidates
+        .map(
+          (
+            candidate,
+            index
+          ) =>
+            byIndex.get(index) ||
+            {
+              ...candidate,
+
+              aiOverall:
+                0,
+
+              aiOpening:
+                0,
+
+              aiMiddle:
+                0,
+
+              aiEnding:
+                0,
+
+              aiStory:
+                0,
+
+              finalScore:
+                candidate.heuristicScore,
+
+              reason:
+                'Local visual scoring fallback.',
+
+              hookIdea:
+                '',
+
+              aiEndingEvidence:
+                ''
+            }
+        )
+        .sort(
+          (a, b) =>
+            b.finalScore -
+            a.finalScore ||
+            b.aiEnding -
+            a.aiEnding ||
+            b.endingScore -
+            a.endingScore
+        );
+
+    return ranked.slice(
+      0,
+      5
+    );
+
+  } catch (error) {
+    console.warn(
+      '[movie best-clip] Gemini ranking unavailable; using local scores:',
+      message(error)
+    );
+
+    return candidates
+      .slice()
+      .sort(
+        (a, b) =>
+          b.endingScore -
+          a.endingScore ||
+          b.heuristicScore -
+          a.heuristicScore
+      )
+      .slice(
+        0,
+        5
+      );
+  }
+}
+
+function evaluateMovieClip(
+  context,
+  duration
+) {
+  const d =
+    Math.max(
+      1,
+      Number(duration) || 1
+    );
+
+  const moments =
+    movieMoments(
+      context,
+      d
+    );
+
+  if (
+    !moments.length
+  ) {
+    return {
+      pass:
+        false,
+
+      overall:
+        0,
+
+      opening:
+        0,
+
+      middle:
+        0,
+
+      ending:
+        0,
+
+      reason:
+        'No visual moments were found in the trimmed candidate.'
+    };
+  }
+
+  const opening =
+    moments.filter(item =>
+      item.time <=
+      Math.min(
+        8,
+        d * 0.24
+      )
+    );
+
+  const middle =
+    moments.filter(item =>
+      item.time >=
+        d * 0.20 &&
+      item.time <=
+        d * 0.78
+    );
+
+  const ending =
+    moments.filter(item =>
+      item.time >=
+      d -
+      Math.min(
+        10,
+        d * 0.28
+      )
+    );
+
+  const actionCount =
+    list =>
+      list.filter(item =>
+        MOVIE_ACTION_RE.test(
+          item.visible
+        )
+      ).length;
+
+  const payoffCount =
+    list =>
+      list.filter(item =>
+        MOVIE_PAYOFF_RE.test(
+          item.visible
+        )
+      ).length;
+
+  const weakCount =
+    list =>
+      list.filter(item =>
+        MOVIE_WEAK_RE.test(
+          item.visible
+        )
+      ).length;
+
+  const openingScore =
+    clamp(
+      opening.length * 1.3 +
+      actionCount(opening) * 2.4,
+      0,
+      10
+    );
+
+  const middleScore =
+    clamp(
+      middle.length * 0.9 +
+      actionCount(middle) * 1.4,
+      0,
+      10
+    );
+
+  const last =
+    moments.at(-1);
+
+  const lastGap =
+    Math.max(
+      0,
+      d -
+      last.time
+    );
+
+  let endingScore =
+    ending.length * 1.2 +
+    actionCount(ending) * 1.8 +
+    payoffCount(ending) * 3.0 -
+    weakCount(ending) * 3.0;
+
+  if (
+    lastGap <= 3.5
+  ) {
+    endingScore += 2.2;
+  } else if (
+    lastGap <= 6.0
+  ) {
+    endingScore += 0.7;
+  } else {
+    endingScore -= 2.8;
+  }
+
+  endingScore =
+    clamp(
+      endingScore,
+      0,
+      10
+    );
+
+  const phaseCoverage =
+    (
+      opening.length
+        ? 1
+        : 0
+    ) +
+    (
+      middle.length
+        ? 1
+        : 0
+    ) +
+    (
+      ending.length
+        ? 1
+        : 0
+    );
+
+  const storyScore =
+    clamp(
+      phaseCoverage * 2.0 +
+      Math.min(
+        4,
+        moments.length * 0.45
+      ) +
+      Math.min(
+        2,
+        payoffCount(ending) * 1.2
+      ),
+      0,
+      10
+    );
+
+  const overall =
+    clamp(
+      openingScore * 0.20 +
+      middleScore * 0.20 +
+      storyScore * 0.20 +
+      endingScore * 0.40,
+      0,
+      10
+    );
+
+  const pass =
+    moments.length >= 5 &&
+    openingScore >= 4.5 &&
+    middleScore >= 4.5 &&
+    endingScore >= 6.0 &&
+    storyScore >= 5.2 &&
+    overall >= 5.8 &&
+    lastGap <= 7.0;
+
+  const reason =
+    pass
+      ? (
+          `Passed clip quality gate: opening ${openingScore.toFixed(1)}/10, ` +
+          `middle ${middleScore.toFixed(1)}/10, ending ${endingScore.toFixed(1)}/10.`
+        )
+      : (
+          `Rejected/weak candidate: opening ${openingScore.toFixed(1)}/10, ` +
+          `middle ${middleScore.toFixed(1)}/10, ending ${endingScore.toFixed(1)}/10, ` +
+          `last visible event ${lastGap.toFixed(1)}s before clip end.`
+        );
+
+  return {
+    pass,
+
+    overall:
+      +overall.toFixed(2),
+
+    opening:
+      +openingScore.toFixed(2),
+
+    middle:
+      +middleScore.toFixed(2),
+
+    ending:
+      +endingScore.toFixed(2),
+
+    story:
+      +storyScore.toFixed(2),
+
+    momentCount:
+      moments.length,
+
+    lastMomentGap:
+      +lastGap.toFixed(2),
+
+    endingEvidence:
+      ending
+        .slice(-4)
+        .map(item =>
+          `${item.time.toFixed(1)}s ${item.visible}`
+        )
+        .join(' | ')
+        .slice(
+          0,
+          560
+        ),
+
+    reason
+  };
+}
+
+async function trimMovieShort(
+  input,
+  output,
+  selection
+) {
+  const start =
+    Math.max(
+      0,
+      Number(
+        selection.start
+      ) || 0
+    );
+
+  const duration =
+    Math.max(
+      1,
+      Number(
+        selection.end
+      ) -
+      start
+    );
+
+  await cmd(
+    CFG.ffmpeg,
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-y',
+
+      '-ss',
+      start.toFixed(3),
+
+      '-i',
+      input,
+
+      '-t',
+      duration.toFixed(3),
+
+      '-map',
+      '0:v:0',
+
+      '-map',
+      '0:a:0?',
+
+      '-c:v',
+      'libx264',
+
+      '-preset',
+      'veryfast',
+
+      '-crf',
+      '20',
+
+      '-pix_fmt',
+      'yuv420p',
+
+      '-c:a',
+      'aac',
+
+      '-b:a',
+      '160k',
+
+      '-avoid_negative_ts',
+      'make_zero',
+
+      '-movflags',
+      '+faststart',
+
+      output
+    ],
+    {
+      timeoutMs:
+        Math.max(
+          180000,
+          Math.min(
+            900000,
+            Math.round(
+              duration *
+              9000
+            )
+          )
+        )
+    }
+  );
+
+  return output;
 }
 
 // ==========================================
@@ -555,12 +2349,6 @@ async function renderJob(j) {
 
     let autoPolished = false;
 
-    // Actual TTS audio length determines
-    // whether narration should be corrected.
-    //
-    // Attempt a maximum of three takes:
-    // original + two optional rewrites.
-
     for (
       let take = 0;
       take < 3;
@@ -608,8 +2396,6 @@ async function renderJob(j) {
       const seconds =
         await durationOf(voiceFile);
 
-      // Voice style now affects BOTH
-      // the audio fitting and video speed.
       const fit = audioFitPlan(
         seconds,
         j.info.duration,
@@ -623,10 +2409,6 @@ async function renderJob(j) {
               Math.max(1, j.info.duration)
             )
           : 0;
-
-      // Always prioritize a renderable take
-      // over a take with an impossible
-      // tempo or a truncated ending.
 
       const distance =
         (fit.canRender ? 0 : 10) +
@@ -695,9 +2477,6 @@ async function renderJob(j) {
         autoPolished = true;
 
       } catch (error) {
-        // Preserve the best recording
-        // if an optional Gemini request fails.
-
         console.warn(
           `[job ${j.id}] optional auto-polish unavailable: ${message(error)}`
         );
@@ -810,52 +2589,367 @@ async function analyzeJob(j) {
       'analyzing'
     );
 
-    j.inputPath =
+    const normalizedInput =
       await inputToMp4(
         j,
         j.originalPath,
         j.mime
       );
 
-    j.info =
+    j.inputPath =
+      normalizedInput;
+
+    j.sourceInfo =
       await probe(
-        j.inputPath
+        normalizedInput
       );
 
-    progress(
-      j,
-      'Uploading to Google Gemini Files API…',
-      12
-    );
+    j.info =
+      j.sourceInfo;
 
-    const first =
-      await analyzeVideo(
-        j.inputPath,
-        j.info.duration,
-        j.options,
+    const movieMode =
+      j.options.voiceStyle ===
+      'fast_explainer';
 
-        (
-          step,
-          percent
-        ) =>
-          progress(
+    const shouldTrim =
+      movieMode &&
+      j.sourceInfo.duration > 62;
+
+    let first;
+
+    if (shouldTrim) {
+      progress(
+        j,
+        'Scanning the full video for multiple strong Short candidates…',
+        10,
+        'analyzing'
+      );
+
+      const scout =
+        await analyzeVideoEvidence(
+          normalizedInput,
+          j.sourceInfo.duration,
+          j.options,
+
+          progressRange(
             j,
-            step,
-            percent
+            10,
+            25
           ),
 
-        j.providerKeys
+          j.providerKeys
+        );
+
+      progress(
+        j,
+        'Ranking clips by hook, action and visible ending payoff…',
+        27,
+        'analyzing'
       );
 
-    j.script = first.script;
+      const rankedCandidates =
+        await chooseMovieShortCandidates(
+          scout.context,
+          j.sourceInfo.duration,
+          j.options,
+          j.providerKeys
+        );
 
-    j.context = first.context;
+      if (!rankedCandidates.length) {
+        throw new Error(
+          'Could not find a usable Movie Shorts candidate in this video.'
+        );
+      }
+
+      const maxChecks =
+        Math.min(
+          3,
+          rankedCandidates.length
+        );
+
+      const attempts = [];
+
+      for (
+        let index = 0;
+        index < maxChecks;
+        index++
+      ) {
+        const candidate =
+          rankedCandidates[index];
+
+        progress(
+          j,
+          `Testing candidate ${index + 1}/${maxChecks}: ` +
+          `${candidate.start.toFixed(1)}s-${candidate.end.toFixed(1)}s…`,
+          30 + index * 5,
+          'analyzing'
+        );
+
+        const candidatePath =
+          join(
+            j.dir,
+            `movie-candidate-${index + 1}.mp4`
+          );
+
+        await trimMovieShort(
+          normalizedInput,
+          candidatePath,
+          candidate
+        );
+
+        const candidateInfo =
+          await probe(
+            candidatePath
+          );
+
+        const evidence =
+          await analyzeVideoEvidence(
+            candidatePath,
+            candidateInfo.duration,
+            j.options,
+
+            progressRange(
+              j,
+              31 + index * 5,
+              35 + index * 5
+            ),
+
+            j.providerKeys
+          );
+
+        const quality =
+          evaluateMovieClip(
+            evidence.context,
+            candidateInfo.duration
+          );
+
+        attempts.push({
+          candidate,
+          path:
+            candidatePath,
+          info:
+            candidateInfo,
+          context:
+            evidence.context,
+          quality,
+          rank:
+            index + 1
+        });
+
+        if (quality.pass) {
+          break;
+        }
+
+        if (
+          index <
+          maxChecks - 1
+        ) {
+          progress(
+            j,
+            `Candidate ${index + 1} had a weak ending; checking the next one…`,
+            35 + index * 5,
+            'analyzing'
+          );
+        }
+      }
+
+      const passing =
+        attempts.find(
+          item =>
+            item.quality.pass
+        );
+
+      const winner =
+        passing ||
+        attempts
+          .slice()
+          .sort(
+            (a, b) =>
+              b.quality.overall -
+              a.quality.overall ||
+              b.quality.ending -
+              a.quality.ending ||
+              (
+                Number(
+                  b.candidate.finalScore
+                ) || 0
+              ) -
+              (
+                Number(
+                  a.candidate.finalScore
+                ) || 0
+              )
+          )[0];
+
+      if (!winner) {
+        throw new Error(
+          'Movie clip quality validation failed.'
+        );
+      }
+
+      j.inputPath =
+        winner.path;
+
+      j.info =
+        winner.info;
+
+      j.context =
+        winner.context;
+
+      j.selectedClip = {
+        ...winner.candidate,
+
+        sourceDuration:
+          +j.sourceInfo.duration
+            .toFixed(3),
+
+        candidateRank:
+          winner.rank,
+
+        qualityGate:
+          winner.quality,
+
+        testedCandidates:
+          attempts.map(item => ({
+            rank:
+              item.rank,
+
+            start:
+              item.candidate.start,
+
+            end:
+              item.candidate.end,
+
+            rankingScore:
+              item.candidate.finalScore ??
+              item.candidate.heuristicScore,
+
+            quality:
+              item.quality
+          }))
+      };
+
+      progress(
+        j,
+        `Best clip locked: ${j.selectedClip.start.toFixed(1)}s-` +
+        `${j.selectedClip.end.toFixed(1)}s · ending ` +
+        `${winner.quality.ending.toFixed(1)}/10. Writing final narration…`,
+        46,
+        'analyzing'
+      );
+
+      const script =
+        await generateScriptFromContext(
+          j.context,
+          j.info.duration,
+          j.options,
+          [],
+          (
+            step,
+            percent
+          ) =>
+            progress(
+              j,
+              step,
+              Math.max(
+                46,
+                Math.min(
+                  49,
+                  Math.round(
+                    46 +
+                    (
+                      Math.max(
+                        0,
+                        Math.min(
+                          50,
+                          Number(percent) || 0
+                        )
+                      ) /
+                      50
+                    ) *
+                    3
+                  )
+                )
+              ),
+              'analyzing'
+            ),
+          j.providerKeys
+        );
+
+      first = {
+        context:
+          j.context,
+
+        script
+      };
+
+    } else {
+      j.selectedClip = {
+        start:
+          0,
+
+        end:
+          +j.sourceInfo.duration
+            .toFixed(3),
+
+        duration:
+          +j.sourceInfo.duration
+            .toFixed(3),
+
+        sourceDuration:
+          +j.sourceInfo.duration
+            .toFixed(3),
+
+        reason:
+          movieMode
+            ? 'Source is already Short-sized, so no trim was needed.'
+            : 'Auto-trim is enabled only for Movie Shorts mode.',
+
+        hookIdea:
+          ''
+      };
+
+      progress(
+        j,
+        'Uploading to Google Gemini Files API…',
+        12
+      );
+
+      first =
+        await analyzeVideo(
+          j.inputPath,
+          j.info.duration,
+          j.options,
+
+          (
+            step,
+            percent
+          ) =>
+            progress(
+              j,
+              step,
+              percent,
+              'analyzing'
+            ),
+
+          j.providerKeys
+        );
+    }
+
+    j.script =
+      first.script;
+
+    j.context =
+      first.context;
 
     j.scriptHistory = [
-      structuredClone(first.script)
+      structuredClone(
+        first.script
+      )
     ];
 
-    j.scriptRevision = 1;
+    j.scriptRevision =
+      1;
 
     await writeMetadata(
       j.dir,
@@ -865,7 +2959,9 @@ async function analyzeJob(j) {
     if (j.options.review) {
       progress(
         j,
-        'Script ready. Review or edit it before rendering.',
+        shouldTrim
+          ? `Auto-selected ${j.info.duration.toFixed(1)}s clip. Script ready for review.`
+          : 'Script ready. Review or edit it before rendering.',
         50,
         'review'
       );
@@ -1162,9 +3258,6 @@ async function deliverFile(
       'nosniff'
   };
 
-  // HTML5 video players commonly request byte ranges.
-  // Returning 206 + Content-Range prevents blank previews,
-  // especially for larger MP4 files served from another origin.
   if (kind === 'video') {
     headers['Accept-Ranges'] =
       'bytes';
@@ -1537,8 +3630,6 @@ const server = http.createServer(
           );
         }
 
-        // JOB STATUS
-
         if (
           req.method === 'GET' &&
           !match[2]
@@ -1549,8 +3640,6 @@ const server = http.createServer(
             externalJob(j)
           );
         }
-
-        // DOWNLOAD
 
         if (
           req.method === 'GET' &&
@@ -1598,8 +3687,6 @@ const server = http.createServer(
             requestUrl.searchParams.get('download') === '1'
           );
         }
-
-        // REGENERATE SCRIPT
 
         if (
           req.method === 'POST' &&
@@ -1702,8 +3789,6 @@ const server = http.createServer(
 
           return;
         }
-
-        // RENDER VIDEO
 
         if (
           req.method === 'POST' &&

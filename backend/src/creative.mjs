@@ -86,7 +86,10 @@ export function classifyFootage(
 // LANGUAGE + COMEDY DIRECTOR
 // ==========================================
 
-function storyLanguage(language, tone) {
+function storyLanguage(
+  language,
+  tone
+) {
   if (language !== 'hi') {
     return `
 US ENGLISH:
@@ -160,6 +163,14 @@ NOT news-report style.
 
 Sound like a witty Indian friend
 doing spontaneous funny commentary.
+
+HUMAN-LIKE DESI SPEECH:
+- Lines should sound spoken, not written by an AI.
+- Use natural little reactions such as "ओए", "अरे", "अबे", "रुक", "चल", "हां", "क्या कर रहा है" only when they fit the scene.
+- Use incomplete reactions, interruptions and quick comebacks instead of perfect textbook sentences.
+- Do not make every line a polished one-liner. Real desi banter has short reactions, hesitation, accusation and callback.
+- Keep each character's personality stable across the clip.
+- Strong gaali/roast may stay when the situation earns it, but the comedy must still come from the visible action.
 
 Energy comes from comic timing
 and expressive words,
@@ -299,7 +310,9 @@ function timeline(
 // PREVENT REPEATED STORIES
 // ==========================================
 
-function previousHooks(previous) {
+function previousHooks(
+  previous
+) {
   return (
     Array.isArray(previous)
       ? previous
@@ -308,11 +321,14 @@ function previousHooks(previous) {
     .slice(-7)
     .map(s => ({
       hook:
-        clean(s?.hook).slice(0, 130),
+        clean(s?.hook)
+          .slice(0, 130),
 
       ending:
         clean(
-          s?.beats?.at(-1)?.text
+          s?.beats
+            ?.at(-1)
+            ?.text
         ).slice(0, 180)
     }));
 }
@@ -321,8 +337,14 @@ function previousHooks(previous) {
 // COMEDY DIALOGUE DIRECTOR
 // ==========================================
 
-function comedyBeatRange(duration) {
-  const d = Math.max(0, Number(duration) || 0);
+function comedyBeatRange(
+  duration
+) {
+  const d =
+    Math.max(
+      0,
+      Number(duration) || 0
+    );
 
   if (d >= 180) return '52-72';
   if (d >= 120) return '40-58';
@@ -330,6 +352,7 @@ function comedyBeatRange(duration) {
   if (d >= 42) return '18-28';
   if (d >= 28) return '14-20';
   if (d >= 16) return '9-14';
+
   return '6-10';
 }
 
@@ -343,18 +366,37 @@ function comedyDialoguePrompt(
   previous,
   multiple
 ) {
-  const d = Number(duration);
-  const moments = timeline(evidence, d);
-  const hindi = language === 'hi';
+  const d =
+    Number(duration);
 
-  const cutTimes = Array.isArray(evidence?.sceneCuts)
-    ? evidence.sceneCuts
-        .map(Number)
-        .filter(x => Number.isFinite(x) && x > 0 && x < d)
-        .sort((a, b) => a - b)
-    : [];
+  const moments =
+    timeline(
+      evidence,
+      d
+    );
 
-  const targetBeats = comedyBeatRange(d);
+  const hindi =
+    language === 'hi';
+
+  const cutTimes =
+    Array.isArray(
+      evidence?.sceneCuts
+    )
+      ? evidence.sceneCuts
+          .map(Number)
+          .filter(x =>
+            Number.isFinite(x) &&
+            x > 0 &&
+            x < d
+          )
+          .sort(
+            (a, b) =>
+              a - b
+          )
+      : [];
+
+  const targetBeats =
+    comedyBeatRange(d);
 
   const schema = `{
     "summary": "what actually happens in the clip",
@@ -375,28 +417,58 @@ function comedyDialoguePrompt(
     }
   }`;
 
-  const windows = moments.length
-    ? moments.map((m, i) => {
-        const next = moments[i + 1]?.time;
-        const end = Number.isFinite(next)
-          ? Math.min(d, next)
-          : d;
+  const windows =
+    moments.length
+      ? moments.map(
+          (
+            m,
+            i
+          ) => {
+            const next =
+              moments[i + 1]
+                ?.time;
 
-        return {
-          start: +Math.max(0, m.time).toFixed(2),
-          end: +Math.max(m.time + 0.30, end).toFixed(2),
-          visible: m.visible,
-          certainty: m.certainty
-        };
-      })
-    : [
-        {
-          start: 0,
-          end: d,
-          visible: clean(evidence?.summary),
-          certainty: 'medium'
-        }
-      ];
+            const end =
+              Number.isFinite(next)
+                ? Math.min(
+                    d,
+                    next
+                  )
+                : d;
+
+            return {
+              start:
+                +Math.max(
+                  0,
+                  m.time
+                ).toFixed(2),
+
+              end:
+                +Math.max(
+                  m.time + 0.30,
+                  end
+                ).toFixed(2),
+
+              visible:
+                m.visible,
+
+              certainty:
+                m.certainty
+            };
+          }
+        )
+      : [
+          {
+            start: 0,
+            end: d,
+            visible:
+              clean(
+                evidence?.summary
+              ),
+            certainty:
+              'medium'
+          }
+        ];
 
   return `
 You are a SHORT-FORM COMEDY DUB DIRECTOR.
@@ -420,16 +492,27 @@ Use the machine shot cuts as hard timing anchors when they agree with the visibl
 
 OPTIONAL RESEARCH:
 ${JSON.stringify({
-  facts: research?.facts || [],
-  sources: research?.sources || []
+  facts:
+    research?.facts || [],
+  sources:
+    research?.sources || []
 }).slice(0, 3000)}
 
-DURATION: ${d.toFixed(2)} seconds.
-LANGUAGE: ${language}
-TONE: ${tone}
+DURATION:
+${d.toFixed(2)} seconds.
+
+LANGUAGE:
+${language}
+
+TONE:
+${tone}
+
 REVISION ${revision}
+
 PREVIOUS HOOKS TO AVOID:
-${JSON.stringify(previousHooks(previous)).slice(0, 2200)}
+${JSON.stringify(
+  previousHooks(previous)
+).slice(0, 2200)}
 
 NON-NEGOTIABLE COMEDY RULES:
 
@@ -443,6 +526,7 @@ NON-NEGOTIABLE COMEDY RULES:
 2. SPEAKER LOCK
 Use stable labels only:
 NARRATOR, MALE_1, MALE_2, MALE_3, FEMALE_1, FEMALE_2, FEMALE_3, CHILD_1, CHILD_2, PERSON_1, PERSON_2, PERSON_3.
+
 Keep the same visible person on the same label for the whole clip.
 If identity/presentation is unclear, use PERSON_n instead of guessing.
 
@@ -457,29 +541,45 @@ If identity/presentation is unclear, use PERSON_n instead of guessing.
 - Do not create repeated 0.5-1.0 second empty gaps.
 
 4. FAST COMEDY PACING
-- Target approximately ${targetBeats} dialogue beats for this ${d.toFixed(1)}s clip when visuals permit. For videos above 90 seconds, spread them across the whole timeline instead of clustering them early.
+- Target approximately ${targetBeats} dialogue beats for this ${d.toFixed(1)}s clip when visuals permit.
+- For videos above 90 seconds, spread them across the whole timeline instead of clustering them early.
 - Most turns should be around 1.2-2.6 seconds, not 4-6 seconds.
-- The spoken delivery will be FAST. Write enough words to feel continuous, but keep every line easy to say.
-- For active scenes, dialogue coverage should feel close to continuous (roughly 80-92% of the timeline).
-- Do not slow a tiny sentence to fill a long shot. Instead add another natural character turn/reaction.
+- The spoken delivery will be FAST.
+- Write enough words to feel continuous, but keep every line easy to say.
+- For active scenes, dialogue coverage should feel close to continuous, roughly 80-92% of the timeline.
+- Do not slow a tiny sentence to fill a long shot.
+- Instead add another natural character turn/reaction.
 
 5. NATURAL DUBBING
 Write what a real person in that situation might say:
 question, complaint, bargain, challenge, reaction, comeback, brag, panic, taunt, misunderstanding, punchline.
+
 Avoid explanatory sentences.
 Avoid long paragraphs.
 Avoid documentary language.
 Use interruptions, short questions and fast comebacks when visually plausible.
+
+HUMAN SPEECH TEST:
+- Read every line in your head as a real Indian person speaking quickly.
+- If it sounds like written dialogue, rewrite it shorter and more conversational.
+- Prefer "ओए रुक, ये क्या कर रहा है?" over formal explanatory Hindi.
+- Let characters react to EACH OTHER, not only to the camera/viewer.
+- Use occasional fillers/interjections, but do not repeat the same filler in every line.
+- A strong gaali may remain when it fits the fictional/comedic scene; do not sanitize the whole style into bland dialogue.
 
 6. RETENTION 0-4 SECONDS
 - First line starts at 0.0s.
 - In the FIRST SECOND, give a funny conflict, demand, accusation, surprise or absurd problem tied to the first visual.
 - By 4 seconds, the viewer must understand the comic problem but NOT know the final payoff.
 - Ideally use 2-3 quick character turns inside the first 4 seconds if the visuals support them.
-- No greeting. No intro. No "दोस्तों". No generic "देखो क्या होता है".
+- No greeting.
+- No intro.
+- No "दोस्तों".
+- No generic "देखो क्या होता है".
 
 7. HATKE COMEDY
-- Do not use the obvious first joke. Create an unusual character motive, misunderstanding or comeback that still fits the visible action.
+- Do not use the obvious first joke.
+- Create an unusual character motive, misunderstanding or comeback that still fits the visible action.
 - Give characters distinct comic personalities: one overconfident, one suspicious, one shameless, one confused, etc., based only on the scene role—not real personal facts.
 - Prefer callbacks: a word/claim from the opening can return with a twist near the payoff.
 - One strong situational punchline is better than random abuse.
@@ -508,8 +608,13 @@ Do not reveal the ending early.
 11. DELIVERY
 Every beat MUST include "delivery" using one of:
 neutral, excited, angry, confused, skeptical, proud, scared, content.
+
 Choose the emotion that matches the visible reaction.
-Comedy should use contrast: confident -> confused, proud -> angry, calm -> shocked.
+Comedy should use contrast:
+confident -> confused,
+proud -> angry,
+calm -> shocked.
+
 Do not mark every line excited.
 
 12. LANGUAGE STYLE
@@ -541,9 +646,12 @@ Do not copy visible source subtitles or any creator's dialogue.
 Use visuals only as factual grounding and write a new comedy dub.
 
 Return JSON only.
+
 ${multiple
-  ? `Write EXACTLY THREE clearly different dialogue versions in {"options":[...]} using this schema for each:\n${schema}`
-  : `Return ONE complete script:\n${schema}`}
+  ? `Write EXACTLY THREE clearly different dialogue versions in {"options":[...]} using this schema for each:
+${schema}`
+  : `Return ONE complete script:
+${schema}`}
 `;
 }
 
@@ -561,7 +669,8 @@ export function buildStoryPrompt(
   previous = [],
   voiceStyle
 ) {
-  const d = Number(duration);
+  const d =
+    Number(duration);
 
   if (
     !Number.isFinite(d) ||
@@ -576,20 +685,24 @@ export function buildStoryPrompt(
     language === 'hi';
 
   const isFast =
-    voiceStyle === 'fast_explainer';
+    voiceStyle ===
+      'fast_explainer';
+
+  const isMovie =
+    voiceStyle ===
+      'fast_explainer';
 
   const isFacts =
-    voiceStyle === 'facts_explainer';
+    voiceStyle ===
+      'facts_explainer';
 
   const isStory =
-    voiceStyle === 'story_narrator';
+    voiceStyle ===
+      'story_narrator';
 
   const isComedy =
-    voiceStyle === 'viral_funny';
-
-  // Older ai.mjs sends 7 arguments.
-  // Newer ai.mjs sends voiceStyle
-  // as the eighth argument.
+    voiceStyle ===
+      'viral_funny';
 
   const multiple =
     arguments.length >= 8;
@@ -610,46 +723,60 @@ export function buildStoryPrompt(
   const genre =
     classifyFootage(evidence);
 
-  const mode = STORY_MODES[
-    Math.max(
-      0,
-      Math.floor(
-        Number(revision) || 0
+  const mode =
+    STORY_MODES[
+      Math.max(
+        0,
+        Math.floor(
+          Number(revision) || 0
+        )
+      ) %
+      STORY_MODES.length
+    ];
+
+  const low =
+    Math.round(
+      d *
+      (
+        hindi
+          ? (
+              isFast ||
+              isFacts ||
+              isStory
+                ? 1.6
+                : 1.35
+            )
+          : (
+              isFast ||
+              isFacts ||
+              isStory
+                ? 1.85
+                : 1.55
+            )
       )
-    ) % STORY_MODES.length
-  ];
+    );
 
-  const low = Math.round(
-    d * (
-      hindi
-        ? (
-            isFast || isFacts || isStory
-              ? 1.6
-              : 1.35
-          )
-        : (
-            isFast || isFacts || isStory
-              ? 1.85
-              : 1.55
-          )
-    )
-  );
-
-  const high = Math.round(
-    d * (
-      hindi
-        ? (
-            isFast || isFacts || isStory
-              ? 2.1
-              : 1.9
-          )
-        : (
-            isFast || isFacts || isStory
-              ? 2.35
-              : 2.05
-          )
-    )
-  );
+  const high =
+    Math.round(
+      d *
+      (
+        hindi
+          ? (
+              isFast ||
+              isFacts ||
+              isStory
+                ? 2.1
+                : 1.9
+            )
+          : (
+              isFast ||
+              isFacts ||
+              isStory
+                ? 2.35
+                : 2.05
+            )
+      )
+    );
 
   const schema = `{
     "summary": "observed actions",
@@ -690,7 +817,10 @@ The real visual event at the
 final moment matters.
 
 ${JSON.stringify(
-  timeline(evidence, d)
+  timeline(
+    evidence,
+    d
+  )
 ).slice(0, 7000)}
 
 OPTIONAL RESEARCH:
@@ -699,8 +829,10 @@ Do not treat facts as
 automatically reliable.
 
 ${JSON.stringify({
-  facts: research?.facts || [],
-  sources: research?.sources || []
+  facts:
+    research?.facts || [],
+  sources:
+    research?.sources || []
 }).slice(0, 4800)}
 
 GENRE:
@@ -723,6 +855,81 @@ ${tone}
 
 VOICE STYLE:
 ${voiceStyle || 'viral_funny'}
+
+MOVIE SHORTS STYLE:
+${
+  isMovie
+    ? `
+MOVIE SHORTS OVERRIDE — HIGHEST PRIORITY FOR THIS PRESET:
+
+You are writing an ORIGINAL fast Hindi/English movie-scene explainer Short.
+The reference style is: immediate curiosity + chronological scene narration +
+continuous fast delivery + delayed payoff. Never copy another creator's script.
+
+OPENING / RETENTION:
+- Start speaking at 0.0s. No greeting, channel intro, movie name, actor name, or setup lecture.
+- The first sentence must create a curiosity gap from the FIRST visible action.
+- In the first 2-3 seconds explain just enough to make the viewer ask "what happens next?"
+- Do NOT reveal the final twist/payoff in the opening.
+
+STORY SHAPE:
+- Follow the uploaded clip in chronological order.
+- Build: STRANGE SITUATION -> IMMEDIATE PROBLEM -> ESCALATION -> CONSEQUENCE -> FINAL PAYOFF.
+- Every sentence must either explain the current visible action or directly set up the next visible action.
+- Compress obvious dialogue/actions instead of translating every line.
+- Never invent a scene, motive, relationship, identity, power, object, location, or outcome not supported by the video.
+- If something is uncertain, use wording such as "लगता है", "शायद", "looks like", or "seems to".
+
+VOICE / PACING:
+- ONE narrator only. Every beat is NARRATOR-style continuous narration.
+- Human, conversational delivery first; speed comes from concise writing, not robotic rushing.
+- Hindi must sound like a real Indian friend telling an intense movie moment in Devanagari Hindi/Hinglish, not formal textbook Hindi.
+- Use short natural connectors such as "लेकिन", "तभी", "अब", "इसी बीच", "और यहीं", "उसे क्या पता था" only when they fit the actual scene.
+- Mix sentence lengths: quick 3-6 word reactions plus clear 7-12 word explanation lines. Do not make every sentence identical.
+- Avoid repetitive "फिर... फिर... फिर..." narration and avoid newsreader wording.
+- Do not use random jokes, roast lines, gaali, or character dubbing in Movie Shorts mode.
+- Aim for useful new information every 2-4 seconds while preserving the selected clip's natural duration.
+
+ON-SCREEN RETENTION HOOK:
+- hook is the permanent top-screen line. It is NOT the SEO title.
+- Make hook 6-12 words, specific to the visible danger/mystery and deliberately incomplete so the viewer needs the next scene for the answer.
+- Do NOT reveal the final payoff in hook.
+- If language is Hindi, hook MUST be natural Devanagari Hindi/Hinglish. Never return an English-only hook for a Hindi video.
+- Use tension/curiosity only when supported by the actual footage. No fake danger or made-up twist.
+
+YOUTUBE SEO TITLE:
+- metadata.title is the upload title, separate from hook.
+- Keep it SHORT: target 28-55 characters BEFORE hashtags; hard maximum 70 total characters.
+- Put the strongest searchable subject/action near the beginning.
+- If language is Hindi, title MUST be natural Devanagari Hindi/Hinglish.
+- Use exactly ONE relevant emoji.
+- End with ONLY 1-2 highly relevant hashtags.
+- Prefer #Shorts plus ONE topic hashtag such as #Shark, #MovieRecap, #Survival, etc.
+- Never force an unrelated hashtag.
+- Do not add 3-5 hashtags to the title and do not keyword-stuff it.
+
+DESCRIPTION / TAGS:
+- Write a UNIQUE description for this exact Short.
+- The first 1-2 lines must naturally contain the 1-2 main search phrases from the title and clearly describe what happens.
+- Keep the useful opening concise; no generic channel intro before the scene description.
+- Add 1-3 directly relevant hashtags at the END of the description.
+- Generate 5-8 focused YouTube Studio tags/keyword variants only.
+- Tags are secondary metadata; do not spam them.
+
+SYNC:
+- First beat starts at 0.0.
+- Final beat reaches the real final visual.
+- Use 4-10 chronological beats for most 24-70 second clips.
+- Use more only when the footage truly changes often.
+- Beats are editing anchors for one continuous narration, not separate voices.
+
+This MOVIE SHORTS block overrides any earlier instruction in this prompt that asks for
+random comedy, roast language, four hashtags in the title, or multiple character voices.
+`
+    : `
+Movie Shorts rules are inactive unless the Movie Shorts preset is selected.
+`
+}
 
 FACTS EXPLAINER STYLE:
 ${
@@ -798,9 +1005,10 @@ and lightly dramatic.
 Keep the story synchronized:
 each beat describes what is
 happening now or what the current
-visual is setting up. Do not reveal
-the ending before the final shot.
-Do not reveal the ending before the final shot.
+visual is setting up.
+
+Do not reveal the ending before
+the final shot.
 `
     : `
 Only use story-style narration
@@ -815,7 +1023,10 @@ ${JSON.stringify(
   previousHooks(previous)
 ).slice(0, 2500)}
 
-${storyLanguage(language, tone)}
+${storyLanguage(
+  language,
+  tone
+)}
 
 STORY PLAN:
 
@@ -879,40 +1090,26 @@ Do not invent events or facts.
 
 11. YOUTUBE METADATA:
 
-Create a specific, honest title
-under 110 characters.
-
-The title must include:
-- 1-3 relevant emojis
-- at least 4 compact hashtags
-  at the end of the title
-
-Use hashtags about the actual
-video, not random trending spam.
+Create a specific, accurate and SHORT title.
+Aim for 28-55 readable characters before hashtags and keep the full title under 70 characters.
+Put the most important searchable words near the beginning.
+Use exactly ONE relevant emoji.
+End with ONLY 1-2 highly relevant hashtags.
+#Shorts plus one topic hashtag is usually enough.
+Never stuff unrelated trending hashtags.
 
 DESCRIPTION:
 
 Use the selected video language.
-If language is Hindi, write the
-description in natural Hindi /
-Hinglish using Devanagari.
-
-Line 1:
-Describe the actual funny
-or unexpected video moment.
-
-Line 2:
-Mention the original funny
-commentary or interpretation.
-
-Add 2-3 relevant hashtags.
+If language is Hindi, write the description in natural Hindi/Hinglish using Devanagari.
+The FIRST 1-2 lines must uniquely describe this exact video and naturally use the 1-2 main search phrases from the title.
+Keep the opening useful and specific, not a generic channel intro.
+Add 1-3 directly relevant hashtags at the END.
 
 TAGS:
 
-Generate 8-12 tags related
-to the actual video.
-
-No irrelevant trending spam.
+Generate 5-8 focused YouTube Studio tags/keyword variants related to the actual video.
+Do not spam broad or unrelated tags.
 
 12. Write an ORIGINAL narration.
 
@@ -922,7 +1119,30 @@ source subtitles or captions.
 
 ${
   multiple
-    ? `
+    ? (
+        isMovie
+          ? `
+Write EXACTLY THREE different ORIGINAL movie-explainer versions:
+
+1. CURIOSITY HOOK — strongest unanswered visual question.
+2. TENSION BUILD — fastest cause-and-effect escalation.
+3. MYSTERY PAYOFF — most intriguing setup without spoiling the ending.
+
+Keep the same chronology and visible facts.
+Vary the opening wording and narration rhythm, not the actual events.
+No roast comedy and no copied source dialogue.
+
+Return JSON ONLY:
+
+{
+  "options": [
+    ${schema},
+    ${schema},
+    ${schema}
+  ]
+}
+`
+          : `
 Write EXACTLY THREE
 different original versions:
 
@@ -947,6 +1167,7 @@ Return JSON ONLY:
   ]
 }
 `
+      )
     : `
 Return ONE complete JSON script:
 
@@ -972,12 +1193,14 @@ export function scriptQualityWarnings(
       ? script.beats
       : [];
 
-  const speech = beats
-    .map(
-      b => clean(b?.text)
-    )
-    .filter(Boolean)
-    .join(' ');
+  const speech =
+    beats
+      .map(
+        b =>
+          clean(b?.text)
+      )
+      .filter(Boolean)
+      .join(' ');
 
   const total =
     wordCount(speech);
@@ -985,19 +1208,24 @@ export function scriptQualityWarnings(
   const hook =
     clean(script?.hook);
 
-  const d = Math.max(
-    1,
-    Number(duration) || 1
-  );
+  const d =
+    Math.max(
+      1,
+      Number(duration) || 1
+    );
 
   const issues = [];
 
   if (!speech) {
-    return ['Narration missing'];
+    return [
+      'Narration missing'
+    ];
   }
 
   if (
-    total < d * (
+    total <
+    d *
+    (
       language === 'hi'
         ? 1.15
         : 1.30
@@ -1009,7 +1237,9 @@ export function scriptQualityWarnings(
   }
 
   if (
-    total > d * (
+    total >
+    d *
+    (
       language === 'hi'
         ? 2.30
         : 2.45
@@ -1071,6 +1301,17 @@ export function scriptQualityWarnings(
   ) {
     issues.push(
       'Hook is too long: make it a short punchy opening.'
+    );
+  }
+
+  if (
+    language === 'hi' &&
+    hook &&
+    !/[\u0900-\u097f]/
+      .test(hook)
+  ) {
+    issues.push(
+      'Hindi on-screen hook must be written in natural Devanagari Hindi/Hinglish.'
     );
   }
 
@@ -1145,14 +1386,17 @@ export function scriptQualityWarnings(
     );
   }
 
-  const repeated = (
-    previous || []
-  ).some(
-    p =>
-      clean(p.hook).toLowerCase() ===
-        clean(script?.hook).toLowerCase() &&
-      clean(p.hook)
-  );
+  const repeated =
+    (
+      previous || []
+    ).some(
+      p =>
+        clean(p.hook)
+          .toLowerCase() ===
+          clean(script?.hook)
+            .toLowerCase() &&
+        clean(p.hook)
+    );
 
   if (repeated) {
     issues.push(
@@ -1161,7 +1405,9 @@ export function scriptQualityWarnings(
   }
 
   if (
-    !clean(evidence?.summary)
+    !clean(
+      evidence?.summary
+    )
   ) {
     issues.push(
       'Visual evidence missing: do not invent facts.'
@@ -1183,7 +1429,10 @@ export function rankScripts(
   previous = []
 ) {
   const desired =
-    Math.max(1, duration) *
+    Math.max(
+      1,
+      duration
+    ) *
     (
       language === 'hi'
         ? 1.65
@@ -1196,7 +1445,10 @@ export function rankScripts(
       : []
   )
     .map(
-      (script, index) => {
+      (
+        script,
+        index
+      ) => {
         const issues =
           scriptQualityWarnings(
             script,
@@ -1206,25 +1458,38 @@ export function rankScripts(
             previous
           );
 
-        const actual = wordCount(
-          (script?.beats || [])
-            .map(b => b.text)
-            .join(' ')
-        );
+        const actual =
+          wordCount(
+            (
+              script?.beats || []
+            )
+              .map(
+                b => b.text
+              )
+              .join(' ')
+          );
 
         const title =
-          clean(script?.metadata?.title);
+          clean(
+            script?.metadata
+              ?.title
+          );
 
-        const ending = Number(
-          script?.beats?.at(-1)?.end
-        );
+        const ending =
+          Number(
+            script?.beats
+              ?.at(-1)
+              ?.end
+          );
 
         let score =
           100 -
           issues.length * 13 -
           20 *
-            Math.abs(actual - desired) /
-            desired;
+          Math.abs(
+            actual - desired
+          ) /
+          desired;
 
         if (
           !title ||
@@ -1234,7 +1499,9 @@ export function rankScripts(
         }
 
         if (
-          !Number.isFinite(ending) ||
+          !Number.isFinite(
+            ending
+          ) ||
           Math.abs(
             ending - duration
           ) > 1
@@ -1246,9 +1513,10 @@ export function rankScripts(
           script,
           index,
 
-          score: Number(
-            score.toFixed(2)
-          ),
+          score:
+            Number(
+              score.toFixed(2)
+            ),
 
           issues
         };
@@ -1256,8 +1524,10 @@ export function rankScripts(
     )
     .sort(
       (a, b) =>
-        b.score - a.score ||
-        a.index - b.index
+        b.score -
+        a.score ||
+        a.index -
+        b.index
     );
 }
 
@@ -1275,24 +1545,28 @@ export function applyHindiNarratorStyle(
     return script;
   }
 
-  const oldImprove = value =>
-    clean(value)
-      .replace(
-        /तत्पश्चात/g,
-        'फिर'
-      )
-      .replace(
-        /उक्त व्यक्ति/g,
-        'ये व्यक्ति'
-      )
-      .replace(
-        /इस दृश्य में/g,
-        'यहाँ'
-      );
+  const oldImprove =
+    value =>
+      clean(value)
+        .replace(
+          /तत्पश्चात/g,
+          'फिर'
+        )
+        .replace(
+          /उक्त व्यक्ति/g,
+          'ये व्यक्ति'
+        )
+        .replace(
+          /इस दृश्य में/g,
+          'यहाँ'
+        );
 
-  const context = clean(
-    JSON.stringify(evidence)
-  );
+  const context =
+    clean(
+      JSON.stringify(
+        evidence
+      )
+    );
 
   const female =
     /(girl|woman|female|lady|लड़की|महिला|युवती)/i
@@ -1302,50 +1576,97 @@ export function applyHindiNarratorStyle(
     /(boy|man|male|guy|लड़का|आदमी|बंदा)/i
       .test(context);
 
-  const nickname = female
-    ? 'बसंती'
-    : male
-      ? 'राजू'
-      : 'बंटी';
+  const nickname =
+    female
+      ? 'बसंती'
+      : male
+        ? 'राजू'
+        : 'बंटी';
 
-  const improve = value => {
-    let text = oldImprove(value)
-      .replace(/तत्पश्चात/g, 'फिर')
-      .replace(/उक्त व्यक्ति/g, nickname)
-      .replace(/इस दृश्य में/g, 'यहां')
-      .replace(/दृश्य/g, 'सीन')
-      .replace(/प्रक्रिया/g, 'जुगाड़')
-      .replace(/प्रदर्शित करती है/g, 'कर रही है')
-      .replace(/प्रदर्शित करता है/g, 'कर रहा है')
-      .replace(/परिवर्तन/g, 'बदलाव')
-      .replace(/समाप्त होता है/g, 'खत्म होता है')
-      .replace(/सफलता से/g, 'मस्त तरीके से')
-      .replace(/युवती|महिला|लड़की/g, nickname)
-      .replace(/युवक|लड़का|आदमी|व्यक्ति/g, nickname);
+  const improve =
+    value => {
+      let text =
+        oldImprove(value)
+          .replace(
+            /तत्पश्चात/g,
+            'फिर'
+          )
+          .replace(
+            /उक्त व्यक्ति/g,
+            nickname
+          )
+          .replace(
+            /इस दृश्य में/g,
+            'यहां'
+          )
+          .replace(
+            /दृश्य/g,
+            'सीन'
+          )
+          .replace(
+            /प्रक्रिया/g,
+            'जुगाड़'
+          )
+          .replace(
+            /प्रदर्शित करती है/g,
+            'कर रही है'
+          )
+          .replace(
+            /प्रदर्शित करता है/g,
+            'कर रहा है'
+          )
+          .replace(
+            /परिवर्तन/g,
+            'बदलाव'
+          )
+          .replace(
+            /समाप्त होता है/g,
+            'खत्म होता है'
+          )
+          .replace(
+            /सफलता से/g,
+            'मस्त तरीके से'
+          )
+          .replace(
+            /युवती|महिला|लड़की/g,
+            nickname
+          )
+          .replace(
+            /युवक|लड़का|आदमी|व्यक्ति/g,
+            nickname
+          );
 
-    if (
-      !/(अरे|भाई|सीन|जुगाड़|कांड|ओहो)/.test(text)
-    ) {
-      text = `अरे ${text}`;
-    }
+      if (
+        !/(अरे|भाई|सीन|जुगाड़|कांड|ओहो)/
+          .test(text)
+      ) {
+        text =
+          `अरे ${text}`;
+      }
 
-    return text;
-  };
+      return text;
+    };
 
   return {
     ...script,
 
     hook:
-      improve(script.hook),
+      improve(
+        script.hook
+      ),
 
-    beats: (
-      script.beats || []
-    ).map(
-      b => ({
-        ...b,
-        text: improve(b.text)
-      })
-    )
+    beats:
+      (
+        script.beats || []
+      ).map(
+        b => ({
+          ...b,
+          text:
+            improve(
+              b.text
+            )
+        })
+      )
   };
 }
 
@@ -1361,106 +1682,143 @@ export function metadataWarnings(
   const warnings = [];
 
   const title =
-    clean(metadata.title);
+    clean(
+      metadata.title
+    );
 
   const description =
-    clean(metadata.description);
+    clean(
+      metadata.description
+    );
 
   const tags =
-    Array.isArray(metadata.tags)
+    Array.isArray(
+      metadata.tags
+    )
       ? metadata.tags
           .map(clean)
           .filter(Boolean)
       : [];
 
   const titleHashtags =
-    title.match(/#[\p{L}\p{N}_]+/gu) || [];
+    title.match(
+      /#[\p{L}\p{N}_]+/gu
+    ) || [];
 
-  const emojiCount = (
-    title.match(/\p{Extended_Pictographic}/gu) ||
-    []
-  ).length;
+  const emojiCount =
+    (
+      title.match(
+        /\p{Extended_Pictographic}/gu
+      ) || []
+    ).length;
 
-  if (
-    !title ||
-    title.length > 110
+  if (!title) {
+    warnings.push(
+      'Title is missing.'
+    );
+
+  } else if (
+    title.length > 70
   ) {
     warnings.push(
-      'Title must be specific and under 110 characters.'
+      'Keep the title under about 70 characters and put the strongest searchable words first.'
     );
   }
 
   if (
-    titleHashtags.length < 4
+    title &&
+    emojiCount !== 1
   ) {
     warnings.push(
-      'Add at least 4 relevant hashtags in the YouTube title.'
+      'Use exactly one relevant emoji in the Short title.'
     );
   }
 
   if (
-    emojiCount < 1 ||
-    emojiCount > 3
+    titleHashtags.length < 1 ||
+    titleHashtags.length > 2
   ) {
     warnings.push(
-      'Title must use 1-3 relevant emojis.'
+      'Use only 1-2 highly relevant title hashtags; avoid hashtag stuffing.'
     );
   }
 
   if (
-    /\b(watch the ending|you won't believe|shocking|viral shorts video|amazing viral|must watch)\b/i
-      .test(title + ' ' + description)
+    /\b(watch the ending|you won't believe|shocking|viral shorts video|amazing viral|must watch|100% viral)\b/i
+      .test(
+        `${title} ${description}`
+      )
   ) {
     warnings.push(
-      'Avoid generic clickbait; make metadata specific to this video.'
+      'Avoid generic clickbait; make metadata specific to the actual scene.'
     );
   }
 
   if (!description) {
     warnings.push(
-      'Video-specific description missing.'
-    );
-  }
-
-  if (
-    tags.length < 8 ||
-    tags.length > 12
-  ) {
-    warnings.push(
-      'Prefer 8-12 focused tags.'
+      'Write a unique video-specific description.'
     );
   }
 
   const descriptionHashtags =
-    description.match(/#[\p{L}\p{N}_]+/gu) || [];
+    description.match(
+      /#[\p{L}\p{N}_]+/gu
+    ) || [];
 
   if (
     description &&
-    descriptionHashtags.length !== 3
+    (
+      descriptionHashtags.length < 1 ||
+      descriptionHashtags.length > 3
+    )
   ) {
     warnings.push(
-      'Description should include exactly 3 relevant hashtags.'
+      'Use 1-3 directly relevant hashtags at the end of the description.'
     );
   }
 
-  const unique = new Set(
-    tags.map(
-      s => s.toLowerCase()
-    )
-  );
-
   if (
-    unique.size !== tags.length
+    tags.length < 5 ||
+    tags.length > 8
   ) {
     warnings.push(
-      'Duplicate tags.'
+      'Use 5-8 focused Studio tags/keyword variants; tags are secondary metadata.'
+    );
+  }
+
+  const unique =
+    new Set(
+      tags.map(
+        item =>
+          item.toLowerCase()
+      )
+    );
+
+  if (
+    unique.size !==
+    tags.length
+  ) {
+    warnings.push(
+      'Remove duplicate tags.'
+    );
+  }
+
+  if (
+    language === 'hi' &&
+    title &&
+    !/[\u0900-\u097f]/
+      .test(title)
+  ) {
+    warnings.push(
+      'Hindi Short title must use natural Devanagari Hindi/Hinglish, not an English-only title.'
     );
   }
 
   if (
     language === 'hi' &&
     description &&
-    !/[\u0900-\u097f]/.test(description)
+    !/[\u0900-\u097f]/
+      .test(description)
   ) {
     warnings.push(
       'Hindi description must use natural Hindi/Hinglish in Devanagari.'

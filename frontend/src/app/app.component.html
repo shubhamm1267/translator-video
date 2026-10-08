@@ -775,7 +775,7 @@
               <button
                 type="button"
                 [class.selected]="options.voiceStyle==='facts_explainer'"
-                (click)="options.voiceStyle='facts_explainer'"
+                (click)="options.voiceStyle='facts_explainer'; options.tone='curious'; options.captions=true; options.cta=true; options.fit='fill'"
               >
 
                 <span>
@@ -796,7 +796,7 @@
               <button
                 type="button"
                 [class.selected]="options.voiceStyle==='viral_funny'"
-                (click)="options.voiceStyle='viral_funny'"
+                (click)="options.voiceStyle='viral_funny'; options.tone='funny'; options.captions=true; options.cta=true; options.fit='fill'"
               >
 
                 <span>
@@ -813,22 +813,53 @@
 
               </button>
 
+
+              <button
+                type="button"
+                [class.selected]="options.voiceStyle==='fast_explainer'"
+                (click)="options.voiceStyle='fast_explainer'; options.tone='curious'; options.captions=false; options.cta=false; options.fit='fill'; options.originalAudio=false; options.coverOriginalCaptions=false"
+              >
+
+                <span>
+                  MOV
+                </span>
+
+                <strong>
+                  Movie Shorts
+                </strong>
+
+                <small>
+                  Fast scene explainer
+                </small>
+
+              </button>
+
             </div>
 
             <small class="control-help">
 
-              <ng-container *ngIf="options.voiceStyle==='viral_funny'; else factsHelp">
+              <ng-container *ngIf="options.voiceStyle==='fast_explainer'; else nonMovieHelp">
+                Movie Shorts uses one fast narrator, zero-intro curiosity
+                storytelling, scene-by-scene chronology, no default karaoke
+                captions/CTA, true 9:16 full-screen framing, a permanent top headline,
+                yellow keyword highlights and red separator lines.
+                Best source length for Shorts is usually about 20-60 seconds.
+              </ng-container>
+
+              <ng-template #nonMovieHelp>
+                <ng-container *ngIf="options.voiceStyle==='viral_funny'; else factsHelp">
                 Comedy automatically tracks recurring characters,
                 gives male/female characters different compatible
                 Cartesia voices, keeps each line on its visual beat,
                 and writes a fast hook + story payoff.
                 The voice selected below is used as the narrator/fallback voice.
-              </ng-container>
+                </ng-container>
 
-              <ng-template #factsHelp>
-                Facts keeps one clear explainer voice, opens with an
-                immediate curiosity hook, and writes search-friendly
-                title + description metadata for the actual clip.
+                <ng-template #factsHelp>
+                  Facts keeps one clear explainer voice, opens with an
+                  immediate curiosity hook, and writes search-friendly
+                  title + description metadata for the actual clip.
+                </ng-template>
               </ng-template>
 
             </small>
